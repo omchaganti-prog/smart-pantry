@@ -1,0 +1,129 @@
+“I have an existing Settings screen UI (tabs: General, AI Chef, Safety, System).
+The UI already renders correctly, but many buttons and toggles do nothing.
+Your task is to wire up ALL Settings buttons so they work properly without changing the visual design.
+
+GENERAL TAB
+
+Profile Card (‘Home Chef – Tap to edit profile’):
+On tap → navigate to EditProfileScreen.
+
+Household (Adults / Children + and – buttons):
+
+Increment/decrement values correctly
+
+Prevent values from going below 0
+
+Save values to persistent storage (localStorage / AsyncStorage / database)
+
+App Theme (Light / Dark):
+
+Toggle theme instantly
+
+Persist theme choice
+
+Apply theme across the entire app
+
+Accent Color Selector:
+
+Change accent color immediately
+
+Save selection
+
+Update buttons, highlights, and icons dynamically
+
+AI CHEF TAB
+
+Cooking Skill Buttons (Beginner / Intermediate / Expert / Professional):
+
+Only one can be active at a time
+
+Save selection
+
+Use value to influence recipe difficulty
+
+Spice Tolerance Slider:
+
+Update value live
+
+Save preference
+
+Use value to filter recipes
+
+Units (Metric / Imperial):
+
+Toggle units
+
+Apply units across recipes and pantry
+
+AI Style → Recipe Style Dropdown:
+
+Save selected style
+
+Influence AI recipe recommendations
+
+SAFETY TAB
+
+Manage Allergies Button:
+
+Navigate to AllergyManagerScreen
+
+Biometric Unlock Toggle:
+
+Enable/disable biometric auth
+
+Store preference securely
+
+PIN Code Toggle:
+
+If enabled → open PIN setup modal
+
+Save securely
+
+SYSTEM TAB
+
+Notification Toggles:
+
+Enable All
+
+Expiration Alerts
+
+Meal Plan Reminders
+
+Shopping List Alerts
+
+Save preferences and trigger notifications accordingly
+
+Clear Pantry Items Button:
+
+Show confirmation modal
+
+Clear pantry data only if confirmed
+
+Factory Reset App Button:
+
+Show destructive confirmation modal
+
+Reset all stored app data
+
+GLOBAL REQUIREMENTS
+
+Every button MUST have a working onClick / onPress handler
+
+No button should be decorative
+
+Add smooth tap animations (scale down → up)
+
+Add optional click sound (respect sound ON/OFF setting)
+
+Settings list must remain scrollable
+
+Bottom navigation bar must NOT move or break
+
+Works on all screen sizes
+
+Persist all settings between app restarts
+
+If a feature is unfinished, navigate to a placeholder screen: ‘Coming Soon’
+
+Do NOT redesign the UI. Only wire logic, navigation, state, and persistence.
+Explain briefly how each section is connected.”

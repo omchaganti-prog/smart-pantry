@@ -1,0 +1,233 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>SmartPantry</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['DM Sans', 'sans-serif'],
+              heading: ['Nunito', 'sans-serif'],
+            }
+          }
+        }
+      }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;500;700&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+      body {
+        font-family: 'DM Sans', sans-serif;
+        background-color: #FAFAF9;
+        -webkit-tap-highlight-color: transparent;
+      }
+      h1, h2, h3, h4, h5, h6, .font-heading {
+        font-family: 'Nunito', sans-serif;
+      }
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      
+      /* Glass Navigation */
+      .glass-nav {
+        background: rgba(255, 255, 255, 0.92);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+      }
+      .dark .glass-nav {
+        background: rgba(31, 41, 55, 0.92);
+      }
+      
+      /* Micro-animations - Smooth, natural, GPU-friendly */
+      @keyframes fadeInUp {
+        from { opacity: 0; transform: translate3d(0, 10px, 0); }
+        to { opacity: 1; transform: translate3d(0, 0, 0); }
+      }
+      @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      @keyframes scaleIn {
+        from { opacity: 0; transform: scale3d(0.96, 0.96, 1); }
+        to { opacity: 1; transform: scale3d(1, 1, 1); }
+      }
+      @keyframes slideUp {
+        from { opacity: 0; transform: translate3d(0, 16px, 0); }
+        to { opacity: 1; transform: translate3d(0, 0, 0); }
+      }
+      @keyframes pulse-soft {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
+      }
+      
+      /* Smooth cubic-bezier easing for natural feel */
+      .animate-fade-in-up { animation: fadeInUp 0.28s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+      .animate-fade-in { animation: fadeIn 0.22s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+      .animate-scale-in { animation: scaleIn 0.24s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+      .animate-slide-up { animation: slideUp 0.32s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+      .animate-pulse-soft { animation: pulse-soft 2.5s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
+      
+      /* Staggered delays for lists - tighter timing */
+      .stagger-1 { animation-delay: 0.04s; }
+      .stagger-2 { animation-delay: 0.08s; }
+      .stagger-3 { animation-delay: 0.12s; }
+      .stagger-4 { animation-delay: 0.16s; }
+      .stagger-5 { animation-delay: 0.20s; }
+      .stagger-6 { animation-delay: 0.24s; }
+      
+      /* Button tap feedback - smooth spring-like feel */
+      .tap-scale { 
+        transition: transform 0.14s cubic-bezier(0.22, 1, 0.36, 1);
+        will-change: transform;
+      }
+      .tap-scale:active { 
+        transform: scale3d(0.96, 0.96, 1); 
+      }
+      
+      /* Food-themed shadows */
+      .shadow-food {
+        box-shadow: 0 4px 20px -4px rgba(34, 197, 94, 0.15),
+                    0 2px 8px -2px rgba(0, 0, 0, 0.06);
+      }
+      .shadow-warm {
+        box-shadow: 0 4px 20px -4px rgba(249, 115, 22, 0.15),
+                    0 2px 8px -2px rgba(0, 0, 0, 0.06);
+      }
+      .shadow-card {
+        box-shadow: 0 4px 24px -6px rgba(0, 0, 0, 0.1),
+                    0 2px 8px -2px rgba(0, 0, 0, 0.04);
+      }
+      .dark .shadow-card {
+        box-shadow: 0 4px 24px -6px rgba(0, 0, 0, 0.4);
+      }
+      
+      /* Page transitions - smooth fade + slide */
+      @keyframes pageEnter {
+        from { opacity: 0; transform: translate3d(0, 8px, 0); }
+        to { opacity: 1; transform: translate3d(0, 0, 0); }
+      }
+      @keyframes pageExit {
+        from { opacity: 1; transform: translate3d(0, 0, 0); }
+        to { opacity: 0; transform: translate3d(0, -6px, 0); }
+      }
+      .page-transition-enter {
+        animation: pageEnter 0.26s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+        will-change: opacity, transform;
+      }
+      .page-transition-exit {
+        animation: pageExit 0.18s cubic-bezier(0.55, 0, 1, 0.45) forwards;
+        will-change: opacity, transform;
+      }
+      
+      /* Recipe list transitions - smooth card animations */
+      @keyframes recipeEnter {
+        from { opacity: 0; transform: translate3d(0, 12px, 0) scale3d(0.98, 0.98, 1); }
+        to { opacity: 1; transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
+      }
+      @keyframes recipeExit {
+        from { opacity: 1; transform: scale3d(1, 1, 1); }
+        to { opacity: 0; transform: scale3d(0.97, 0.97, 1); }
+      }
+      .recipe-enter { 
+        animation: recipeEnter 0.28s cubic-bezier(0.22, 1, 0.36, 1) forwards; 
+        will-change: opacity, transform;
+      }
+      .recipe-exit { 
+        animation: recipeExit 0.16s cubic-bezier(0.55, 0, 1, 0.45) forwards; 
+        will-change: opacity, transform;
+      }
+      
+      /* Icon toggle animations - subtle pop */
+      @keyframes iconPop {
+        0% { transform: scale3d(1, 1, 1); }
+        50% { transform: scale3d(1.18, 1.18, 1); }
+        100% { transform: scale3d(1, 1, 1); }
+      }
+      .icon-pop { animation: iconPop 0.26s cubic-bezier(0.22, 1, 0.36, 1); }
+      
+      /* Toggle switch animation - smooth movement */
+      .toggle-smooth { 
+        transition: background-color 0.18s cubic-bezier(0.22, 1, 0.36, 1), 
+                    transform 0.18s cubic-bezier(0.22, 1, 0.36, 1); 
+      }
+      
+      /* Color transitions for theme changes */
+      .color-transition {
+        transition: background-color 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+                    color 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+                    border-color 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+      }
+      
+      /* Hover lift effect for web */
+      @media (hover: hover) {
+        .hover-lift { 
+          transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), 
+                      box-shadow 0.18s cubic-bezier(0.22, 1, 0.36, 1); 
+          will-change: transform;
+        }
+        .hover-lift:hover { transform: translate3d(0, -2px, 0); }
+      }
+      
+      /* Reduce motion - respect user preference */
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+        }
+        .animate-fade-in-up, .animate-fade-in, .animate-scale-in, 
+        .animate-slide-up, .page-transition-enter, .page-transition-exit,
+        .recipe-enter, .recipe-exit, .icon-pop {
+          animation: none !important;
+          opacity: 1 !important;
+          transform: none !important;
+        }
+        .tap-scale:active { transform: none; }
+        html { scroll-behavior: auto; }
+      }
+      
+      /* Better input focus states */
+      input:focus, select:focus, textarea:focus {
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2);
+      }
+      .dark input:focus, .dark select:focus, .dark textarea:focus {
+        box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.3);
+      }
+      
+      /* Smooth scrolling */
+      html { scroll-behavior: smooth; }
+      
+      /* Better text rendering */
+      * {
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "recharts": "https://aistudiocdn.com/recharts@^3.5.1",
+    "react/": "https://aistudiocdn.com/react@^19.2.1/",
+    "react": "https://aistudiocdn.com/react@^19.2.1",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.556.0",
+    "react-router-dom": "https://aistudiocdn.com/react-router-dom@^7.10.1",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.31.0",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.2",
+    "vite": "https://aistudiocdn.com/vite@^7.2.7"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

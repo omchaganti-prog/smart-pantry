@@ -1,0 +1,153 @@
+“Create an advanced guided walkthrough that visually guides users through the app and explains every major feature, while requiring the user to interact naturally (tap buttons themselves).”
+
+🎯 CORE BEHAVIOR
+
+Walkthrough:
+
+Highlights features one at a time
+
+Explains what each feature does
+
+Waits for the user to tap the highlighted element
+
+NO automatic clicking
+
+NO forced navigation
+
+User stays in control
+
+🧭 WALKTHROUGH FLOW
+1️⃣ Welcome
+
+Text:
+
+“Let’s take a quick tour. Tap highlighted areas to continue.”
+
+2️⃣ Home Screen
+
+Highlight recipe cards
+Text:
+
+“This is where your recipes appear. Tap one to continue.”
+
+➡️ Continue only after user taps a recipe.
+
+3️⃣ Filters (Diet / Cuisine / Mode)
+
+Highlight filter area
+Text:
+
+“Use these to control what recipes you see. Try opening one.”
+
+➡️ Continue after any filter is tapped.
+
+4️⃣ Food Mood 😊
+
+Highlight mood selector
+Text:
+
+“Pick how you feel to adjust suggestions.”
+
+➡️ Continue after mood selection.
+
+5️⃣ Recipe Page
+
+Highlight ingredients & steps
+Text:
+
+“Recipes show ingredients, steps, and videos.”
+
+➡️ Continue after user scrolls.
+
+6️⃣ Favorites ❤️ & Save 📌
+
+Highlight icons
+Text:
+
+“Save recipes you like.”
+
+➡️ Continue after user taps one.
+
+7️⃣ Pantry
+
+Highlight Pantry tab
+Text:
+
+“Track ingredients you have.”
+
+➡️ Continue after user opens Pantry.
+
+8️⃣ Cart 🛒
+
+Highlight Cart
+Text:
+
+“Missing items go here.”
+
+➡️ Continue after opening Cart.
+
+9️⃣ Allergies 🚫
+
+Highlight Settings → Allergies
+Text:
+
+“Tell us what foods to avoid.”
+
+➡️ Continue after opening Allergies.
+
+🔟 Settings ⚙️
+
+Highlight Settings
+Text:
+
+“Customize the app here.”
+
+✅ Finish
+
+Text:
+
+“You’re all set! Happy cooking 🍳”
+
+🎨 UI / UX REQUIREMENTS
+
+Dim background
+
+Spotlight around active element
+
+Arrow or pulse animation
+
+Clear text (1–2 lines max)
+
+Food-themed colors
+
+Bottom navigation always visible
+
+💾 STATE & SAFETY
+
+Save walkthrough progress
+
+Resume if app closes
+
+Skip button always available
+
+Never block real interactions
+
+Never modify user data
+
+🧪 TESTING
+
+First launch
+
+Partial completion
+
+Replay from Settings
+
+Light / Dark mode
+
+Small & large screens
+
+Do NOT auto-click anything
+Do NOT block user actions
+Do NOT redesign UI
+Only guide, highlight, and explain
+Explain briefly how progress is tracked.”
