@@ -1,0 +1,34 @@
+# Render Blueprint — one service running the Express server, which also serves the
+# built frontend. Same origin for the app and its API, so session cookies work with no
+# CORS and no cross-site cookie rules.
+#
+# SQLite needs a persistent disk: without one, users and sessions are wiped on every
+# deploy and restart (Render's normal filesystem is ephemeral).
+services:
+  - type: web
+    name: smart-pantry
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/auth/config
+    disk:
+      name: smart-pantry-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # keep the database on the persistent disk, not the ephemeral app directory
+      - key: DATABASE_URL
+        value: /data/local.db
+      # login is required in production; the dev bypass must stay off
+      - key: SKIP_AUTH
+        value: "false"
+      - key: SESSION_SECRET
+        generateValue: true
+      # set these two in the Render dashboard — never commit them
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false

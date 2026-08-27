@@ -91,6 +91,34 @@ The browser receives a Google ID token and posts it to `/api/auth/google`, which
 it was issued for this client ID, is unexpired, and has a verified email — then creates a
 session. No client secret is involved.
 
+## Deploying
+
+The Express server serves the built frontend itself, so the whole app is **one service
+on one origin** — which keeps session cookies working with no CORS and no cross-site
+cookie rules. [`render.yaml`](render.yaml) describes it as a Render Blueprint.
+
+> Serverless hosts (Vercel/Netlify functions) are a poor fit here: `better-sqlite3` needs
+> a real writable disk, and recipe generation takes 12–25s, which is at or past typical
+> function time limits. A static-only deploy gives you the UI with every `/api/*` call
+> returning 404.
+
+**Deploy on Render**
+
+1. Push this repo to GitHub.
+2. https://dashboard.render.com → **New → Blueprint** → pick the repo. Render reads
+   `render.yaml` (Node, `npm install && npm run build`, `npm start`, 1 GB disk at `/data`).
+3. When prompted, set the two secrets — they're deliberately not in the file:
+   - `OPENAI_API_KEY`
+   - `GOOGLE_CLIENT_ID`
+   `SESSION_SECRET` is generated for you; `DATABASE_URL` points at `/data/local.db` on the
+   persistent disk so users and sessions survive restarts and deploys.
+4. Deploy, then copy your URL (e.g. `https://smart-pantry.onrender.com`).
+5. Add that URL to **Authorized JavaScript origins** in Google Cloud —
+   https://console.cloud.google.com/apis/credentials — alongside the localhost entries.
+   Still no redirect URIs.
+
+The free plan sleeps after inactivity, so the first request after idle takes ~30s to wake.
+
 ## Scripts
 
 | Command | Does |

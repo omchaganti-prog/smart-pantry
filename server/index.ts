@@ -41,7 +41,8 @@ app.use((req, res, next) => {
     }
   });
 
-  const port = 5000;
+  // Hosts like Render assign the port at runtime; 5000 is only the local default.
+  const port = Number(process.env.PORT) || 5000;
   server.listen(port, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${port}`);
   });
