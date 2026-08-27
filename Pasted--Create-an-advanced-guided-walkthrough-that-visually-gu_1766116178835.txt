@@ -1,0 +1,2 @@
+cd "C:\Users\satya\OneDrive\Desktop\smart_pantry\smart-pantry-main\smart-pantry-main"
+npm run dev

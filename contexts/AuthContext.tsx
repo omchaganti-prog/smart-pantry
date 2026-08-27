@@ -17,6 +17,9 @@ interface AuthContextType {
   isGuest: boolean;
   login: () => void;
   logout: () => void;
+  /** Exchanges a Google ID token for a server session. */
+  signInWithGoogle: (credential: string) => Promise<void>;
+  googleClientId: string | null;
   enterGuestMode: () => void;
   refetchUser: () => Promise<void>;
 }
@@ -27,6 +30,32 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isGuest, setIsGuest] = useState(false);
+  const [googleClientId, setGoogleClientId] = useState<string | null>(null);
+
+  // The server owns the client id so it lives in one place (.env) rather than being
+  // duplicated into the frontend bundle.
+  useEffect(() => {
+    fetch('/api/auth/config')
+      .then(r => (r.ok ? r.json() : null))
+      .then(cfg => setGoogleClientId(cfg?.googleEnabled ? cfg.googleClientId : null))
+      .catch(() => setGoogleClientId(null));
+  }, []);
+
+  const signInWithGoogle = async (credential: string) => {
+    const response = await fetch('/api/auth/google', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ credential }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.message || 'Google sign-in failed.');
+    }
+    localStorage.removeItem('guest_mode');
+    setIsGuest(false);
+    setUser(await response.json());
+  };
 
   const fetchUser = async () => {
     try {
@@ -59,15 +88,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     fetchUser();
   }, []);
 
+  // Leaving guest mode drops you on the sign-in screen, where the Google button lives.
+  // (This used to redirect to /api/login, a Replit OIDC route that no longer exists.)
   const login = () => {
     localStorage.removeItem('guest_mode');
-    window.location.href = '/api/login';
+    setIsGuest(false);
+    setUser(null);
   };
 
-  const logout = () => {
+  const logout = async () => {
     localStorage.removeItem('guest_mode');
     setIsGuest(false);
-    window.location.href = '/api/logout';
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch {
+      /* ending the local session still matters even if the request failed */
+    }
+    setUser(null);
+    window.location.hash = '#/';
   };
 
   const enterGuestMode = () => {
@@ -91,6 +129,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         logout,
         enterGuestMode,
         refetchUser,
+        signInWithGoogle,
+        googleClientId,
       }}
     >
       {children}

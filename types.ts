@@ -35,19 +35,21 @@ export interface ScanResult {
   confidence: number;
 }
 
-export type IngredientCategory = 'Dry Ingredients' | 'Wet Ingredients' | 'Seasonings & Spices' | 'Add-ins / Optional';
-
-export interface RecipeIngredient {
+// Ingredient item used inside ingredient sections. Keep a few optional fields
+// for backward compatibility with existing code, but primary shape is simple.
+export interface IngredientItem {
   name: string;
-  amount: string; // The amount with metric equivalent (e.g., "1 cup (240ml)")
-  category: IngredientCategory; // Ingredient grouping
-  status: 'Have' | 'Missing' | 'Partial';
-  amountToBuy?: string; // The specific amount needed to fill the gap
+  quantity: string;
+  unit?: string;
+
+  // Optional legacy fields (kept for compatibility; not required by new AI)
+  status?: 'Have' | 'Missing' | 'Partial';
+  amountToBuy?: string;
   substitute?: string;
-  isAllergen?: boolean; // Allergy detection flag
-  isOptional?: boolean; // Whether ingredient is optional
-  prepNote?: string; // Preparation notes (e.g., "finely diced", "room temperature")
-  cautionNote?: string; // Warning for easy-to-overuse ingredients
+  isAllergen?: boolean;
+  isOptional?: boolean;
+  prepNote?: string;
+  cautionNote?: string;
 }
 
 export interface RecipeNutrition {
@@ -63,6 +65,11 @@ export interface ServingScaleMultiplier {
   yield: string; // e.g., "Makes 8-10 pancakes"
 }
 
+export interface IngredientSection {
+  title: string;
+  items: IngredientItem[];
+}
+
 export interface Recipe {
   id: string;
   title: string;
@@ -76,7 +83,14 @@ export interface Recipe {
   prepTimeMinutes: number;
   cookTimeMinutes: number;
   servings: number;
-  ingredients: RecipeIngredient[];
+
+  // New structured ingredient model: recipe-defined sections.
+  ingredientSections?: IngredientSection[];
+
+  // Legacy flat ingredients array (optional). New code should normalize
+  // this into `ingredientSections` when present.
+  ingredients?: IngredientItem[];
+
   instructions: string[];
   nutrition: RecipeNutrition;
   tags: string[];

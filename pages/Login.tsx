@@ -1,12 +1,19 @@
-import React from 'react';
-import { ChefHat, Sparkles, ShieldCheck } from 'lucide-react';
+import React, { useState } from 'react';
+import { ChefHat, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import GoogleSignInButton from '../components/GoogleSignInButton';
 
 const Login: React.FC = () => {
-  const { login, enterGuestMode } = useAuth();
+  const { enterGuestMode, signInWithGoogle, googleClientId } = useAuth();
+  const [error, setError] = useState<string | null>(null);
 
-  const handleLogin = () => {
-    login();
+  const handleGoogleCredential = async (credential: string) => {
+    setError(null);
+    try {
+      await signInWithGoogle(credential);
+    } catch (err: any) {
+      setError(err?.message || 'Google sign-in failed.');
+    }
   };
 
   const handleGuestMode = () => {
@@ -30,16 +37,32 @@ const Login: React.FC = () => {
 
         <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-xl p-8 space-y-6">
           <div className="space-y-3">
-            <button
-              onClick={handleLogin}
-              className="w-full py-4 px-6 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-2xl font-bold text-lg shadow-lg shadow-green-500/30 hover:shadow-green-500/50 active:scale-95 transition-all flex items-center justify-center gap-3"
-            >
-              <Sparkles size={20} />
-              Sign In
-            </button>
-            <p className="text-center text-xs text-gray-400">
-              Sign in with Google, Apple, GitHub, or Email
-            </p>
+            {googleClientId ? (
+              <>
+                <GoogleSignInButton
+                  clientId={googleClientId}
+                  onCredential={handleGoogleCredential}
+                  onError={setError}
+                />
+                <p className="text-center text-xs text-gray-400">
+                  Your pantry, recipes and preferences sync to your Google account
+                </p>
+              </>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 p-4 text-center">
+                <p className="text-sm font-bold text-gray-600 dark:text-gray-300 mb-1">
+                  Google sign-in isn't set up yet
+                </p>
+                <p className="text-xs text-gray-400 leading-relaxed">
+                  Add <code className="font-mono">GOOGLE_CLIENT_ID</code> to the server's{' '}
+                  <code className="font-mono">.env</code> and restart it. You can keep using
+                  the app as a guest in the meantime.
+                </p>
+              </div>
+            )}
+            {error && (
+              <p className="text-center text-xs font-semibold text-red-500">{error}</p>
+            )}
           </div>
 
           <div className="relative">
@@ -64,10 +87,10 @@ const Login: React.FC = () => {
         <div className="mt-8 space-y-4">
           <div className="flex items-center gap-3 text-gray-500 dark:text-gray-400">
             <ShieldCheck size={18} className="text-green-500" />
-            <span className="text-sm">Secure authentication powered by Replit</span>
+            <span className="text-sm">Secure sign-in with your Google account</span>
           </div>
           <p className="text-center text-xs text-gray-400">
-            By signing in, you agree to sync your pantry, recipes, and preferences
+            Guest mode keeps everything on this device only
           </p>
         </div>
       </div>

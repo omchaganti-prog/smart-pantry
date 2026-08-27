@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { HashRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import Dashboard from './pages/Dashboard';
@@ -24,6 +24,9 @@ import { WalkthroughProvider } from './contexts/WalkthroughContext';
 import { RecentlyViewedProvider } from './contexts/RecentlyViewedContext';
 import { UndoProvider } from './contexts/UndoContext';
 import UndoToast from './components/UndoToast';
+import LockScreen from './components/LockScreen';
+import { isPinSet, isUnlocked } from './services/pinService';
+import { getUserProfile } from './services/storageService';
 
 const queryClient = new QueryClient();
 
@@ -31,7 +34,17 @@ const AppContent: React.FC = () => {
   const location = useLocation();
   const { isLoading, isAuthenticated } = useAuth();
 
+  // Settings → PIN Lock. Unlocking lasts for the browser session.
+  const [locked, setLocked] = useState(() => {
+    const pinEnabled = getUserProfile()?.settings?.security?.pinLock;
+    return Boolean(pinEnabled) && isPinSet() && !isUnlocked();
+  });
+
   const showNav = location.pathname !== '/scan' && location.pathname !== '/login';
+
+  if (locked) {
+    return <LockScreen onUnlock={() => setLocked(false)} />;
+  }
 
   if (isLoading) {
     return (

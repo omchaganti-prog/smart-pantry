@@ -8,6 +8,8 @@ import memoize from "memoizee";
 import connectPg from "connect-pg-simple";
 import { storage } from "./storage";
 
+const useMockAuth = process.env.SKIP_AUTH === "true";
+
 const getOidcConfig = memoize(
   async () => {
     return await client.discovery(
@@ -20,6 +22,21 @@ const getOidcConfig = memoize(
 
 export function getSession() {
   const sessionTtl = 7 * 24 * 60 * 60 * 1000;
+  
+  if (useMockAuth) {
+    // Use memory store for dev with mock auth
+    return session({
+      secret: process.env.SESSION_SECRET || "dev-secret-change-in-production",
+      resave: false,
+      saveUninitialized: false,
+      cookie: {
+        httpOnly: true,
+        secure: false, // set to true in production with HTTPS
+        maxAge: sessionTtl,
+      },
+    });
+  }
+  
   const pgStore = connectPg(session);
   const sessionStore = new pgStore({
     conString: process.env.DATABASE_URL,
@@ -61,6 +78,16 @@ async function upsertUser(claims: any) {
 }
 
 export async function setupAuth(app: Express) {
+  if (useMockAuth) {
+    app.use((req, _res, next) => {
+      // Lightweight dev-only auth: attach a static user and mark as authenticated
+      (req as any).user = { claims: { sub: "dev-user" } };
+      req.isAuthenticated = (() => true) as typeof req.isAuthenticated;
+      next();
+    });
+    return;
+  }
+
   app.set("trust proxy", 1);
   app.use(getSession());
   app.use(passport.initialize());
@@ -129,6 +156,10 @@ export async function setupAuth(app: Express) {
 }
 
 export const isAuthenticated: RequestHandler = async (req, res, next) => {
+  if (useMockAuth) {
+    return next();
+  }
+
   const user = req.user as any;
 
   if (!req.isAuthenticated() || !user.expires_at) {

@@ -62,16 +62,19 @@ export const generateRecipeFromDish = async (
  * Generates recipes based on available pantry items, prioritizing expiring ones.
  */
 export const suggestRecipes = async (
-  items: PantryItem[], 
+  items: PantryItem[],
   preferences: RecipePreferences,
-  userProfile?: UserProfile
+  userProfile?: UserProfile,
+  excludeTitles?: string[]
 ): Promise<Recipe[]> => {
   try {
+    console.log('[geminiService] suggestRecipes -> POST /api/gemini/suggest-recipes', { itemsLength: items?.length });
     const response = await fetch('/api/gemini/suggest-recipes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items, preferences, userProfile })
+      body: JSON.stringify({ items, preferences, userProfile, excludeTitles })
     });
+    console.log('[geminiService] suggestRecipes response.ok', response.ok, 'status', response.status);
 
     if (!response.ok) {
       const error = await response.json();

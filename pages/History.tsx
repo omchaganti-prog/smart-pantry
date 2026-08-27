@@ -2,13 +2,15 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useRecentlyViewed } from '../contexts/RecentlyViewedContext';
 import { Clock, ArrowLeft, Utensils, Trash2 } from 'lucide-react';
+import { Recipe } from '../types';
+import { queueRecipeToOpen } from '../services/openRecipeService';
 
 const History: React.FC = () => {
   const navigate = useNavigate();
   const { recentlyViewed, clearRecentlyViewed } = useRecentlyViewed();
 
-  const handleRecipeClick = (title: string) => {
-    sessionStorage.setItem('smart_pantry_quick_search', title);
+  const handleRecipeClick = (recipe: Recipe) => {
+    queueRecipeToOpen(recipe);
     navigate('/recipes');
   };
 
@@ -45,7 +47,7 @@ const History: React.FC = () => {
           {recentlyViewed.map((recipe) => (
             <div
               key={recipe.id}
-              onClick={() => handleRecipeClick(recipe.title)}
+              onClick={() => handleRecipeClick(recipe)}
               className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-card overflow-hidden cursor-pointer hover:border-blue-200 dark:hover:border-blue-800 transition-all tap-scale hover:shadow-lg"
             >
               <div className="w-full h-28 relative overflow-hidden">

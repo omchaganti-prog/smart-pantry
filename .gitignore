@@ -22,3 +22,14 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local secrets
+.env
+.env.local
+
+# Local SQLite database (holds user + session rows)
+local.db
+local.db-journal
+
+# scratch
+request.json

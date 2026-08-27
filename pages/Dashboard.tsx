@@ -4,6 +4,8 @@ import { getItems, getUserProfile } from '../services/storageService';
 import { AlertTriangle, ChevronRight, ScanLine, Utensils, Calendar, ShoppingCart, Leaf, Clock, History } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useRecentlyViewed } from '../contexts/RecentlyViewedContext';
+import { runNotificationChecks } from '../services/notificationService';
+import { queueRecipeToOpen } from '../services/openRecipeService';
 
 const Dashboard: React.FC = () => {
   const [items, setItems] = useState<PantryItem[]>([]);
@@ -13,7 +15,11 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     setItems(getItems());
-    setProfile(getUserProfile());
+    const loaded = getUserProfile();
+    setProfile(loaded);
+    // Notification toggles in Settings are checked here, on app open — a web app can't
+    // raise them while it's closed. Each kind is rate-limited inside the service.
+    runNotificationChecks(loaded);
   }, []);
 
   // Stats
@@ -117,7 +123,7 @@ const Dashboard: React.FC = () => {
               <div 
                 key={recipe.id}
                 onClick={() => {
-                  sessionStorage.setItem('smart_pantry_quick_search', recipe.title);
+                  queueRecipeToOpen(recipe);
                   navigate('/recipes');
                 }}
                 className="flex-shrink-0 w-32 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-card overflow-hidden tap-scale cursor-pointer hover:border-blue-200 dark:hover:border-blue-800 transition-colors"

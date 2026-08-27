@@ -1,17 +1,19 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { setupAuth, isAuthenticated } from "./replitAuth";
+import { setupGoogleAuth, requireAuth, currentUserId } from "./googleAuth";
 import geminiRoutes from "./geminiRoutes";
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  await setupAuth(app);
+  // Google sign-in + a SQLite-backed session. Replit's OIDC only works inside Replit,
+  // so it can't be the login path for a locally run or self-hosted app.
+  setupGoogleAuth(app);
   
   app.use('/api/gemini', geminiRoutes);
 
-  app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
+  app.get('/api/auth/user', requireAuth, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = currentUserId(req)!;
       const user = await storage.getUser(userId);
       res.json(user);
     } catch (error) {
@@ -20,9 +22,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/auth/user', isAuthenticated, async (req: any, res) => {
+  app.patch('/api/auth/user', requireAuth, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = currentUserId(req)!;
       const { firstName, lastName, allergies, dietaryPreferences } = req.body;
       const user = await storage.updateUser(userId, {
         firstName,
@@ -37,11 +39,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete('/api/auth/user', isAuthenticated, async (req: any, res) => {
+  app.delete('/api/auth/user', requireAuth, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = currentUserId(req)!;
       await storage.deleteUser(userId);
-      req.logout(() => {
+      // req.logout() came from passport; the session is ours to end now
+      req.session.destroy(() => {
+        res.clearCookie("connect.sid");
         res.json({ message: "Account deleted" });
       });
     } catch (error) {

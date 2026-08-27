@@ -4,6 +4,7 @@ import { analyzeImage } from '../services/geminiService';
 import { saveItem } from '../services/storageService';
 import { FoodCategory, PantryItem, ScanResult } from '../types';
 import { useNavigate } from 'react-router-dom';
+import { useWaitMessage } from '../hooks/useWaitMessage';
 
 const Scanner: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -12,6 +13,7 @@ const Scanner: React.FC = () => {
   const [isStreamActive, setIsStreamActive] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const waiting = useWaitMessage(isAnalyzing);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -219,6 +221,16 @@ const Scanner: React.FC = () => {
                  <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-green-500 mb-4"></div>
                  <p className="text-green-400 font-mono text-sm animate-pulse">DETECTING OBJECTS...</p>
                  <p className="text-green-400 font-mono text-sm animate-pulse delay-75">READING DATES (OCR)...</p>
+                 {waiting.message && (
+                   <div className="mt-5 mx-6 px-4 py-3 rounded-2xl bg-white/10 border border-white/20 backdrop-blur-sm max-w-[280px]">
+                     <p className="text-xs font-semibold text-amber-300 leading-relaxed text-center">
+                       {waiting.message}
+                     </p>
+                     <p className="text-[10px] text-amber-200/70 mt-1 font-medium text-center">
+                       {waiting.elapsedSeconds}s elapsed
+                     </p>
+                   </div>
+                 )}
                </div>
              )}
           </div>

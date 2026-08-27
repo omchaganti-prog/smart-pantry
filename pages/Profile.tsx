@@ -5,6 +5,7 @@ import { UserProfile, Recipe } from '../types';
 import { Edit2, Check, Save, X, Utensils, Heart, AlertTriangle, Bookmark, Clock, ChevronRight, Trash2 } from 'lucide-react';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { useUndo } from '../contexts/UndoContext';
+import { queueRecipeToOpen } from '../services/openRecipeService';
 
 const AVATARS = [
   '👨‍🍳', '👩‍🍳', '🥑', '🍕', '🍔', '🥗', 
@@ -40,7 +41,8 @@ const RecipeCard: React.FC<{ recipe: Recipe; onRemove: () => void; isFavorite?: 
       </button>
       <button
         onClick={() => {
-          sessionStorage.setItem('smart_pantry_quick_search', recipe.title);
+          // open the saved recipe itself, not a fresh generation of the same dish name
+          queueRecipeToOpen(recipe);
           navigate('/recipes');
         }}
         className="p-2 text-gray-400 hover:text-green-600 dark:hover:text-green-400 transition-colors"

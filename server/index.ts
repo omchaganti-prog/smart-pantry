@@ -1,3 +1,4 @@
+import "dotenv/config"; // load environment variables from .env for local development
 import express from "express";
 import cors from "cors";
 import path from "path";
@@ -15,6 +16,16 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
+// Simple request logger to help debug incoming API calls from the dev client
+app.use((req, res, next) => {
+  try {
+    console.log(`[server] ${req.method} ${req.path}`);
+  } catch (e) {
+    // ignore logging errors
+  }
+  next();
+});
 
 (async () => {
   const server = await registerRoutes(app);

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { getUserProfile, saveUserProfile, clearItems, clearShoppingList } from '../services/storageService';
+import { getUserProfile, saveUserProfile, clearItems, clearAllData } from '../services/storageService';
 import { UserProfile, ThemePreference, SkillLevel } from '../types';
 import { 
   Moon, Sun, Bell, Scale, Flame, Trash2, 
@@ -16,6 +16,13 @@ import { useSpiceTolerance, getSpiceLabelFromValue } from '../contexts/SpiceTole
 import { useAllergy } from '../contexts/AllergyContext';
 import { useUndo } from '../contexts/UndoContext';
 import { useWalkthrough } from '../contexts/WalkthroughContext';
+import {
+  requestNotificationPermission,
+  notificationPermission,
+  runNotificationChecks,
+} from '../services/notificationService';
+import { setPin, clearPin } from '../services/pinService';
+import { biometricAvailable, enrolBiometric, clearBiometric } from '../services/biometricService';
 
 const THEME_COLORS: Record<ThemePreference, string> = {
   [ThemePreference.BASIL]: 'bg-green-500',
@@ -39,9 +46,11 @@ const Settings: React.FC = () => {
   const { showUndo } = useUndo();
   const { startWalkthrough } = useWalkthrough();
   const [allergyInput, setAllergyInput] = useState('');
+  const [notifyPermission, setNotifyPermission] = useState(notificationPermission());
 
   useEffect(() => {
     setProfile(getUserProfile());
+    setNotifyPermission(notificationPermission());
   }, []);
 
   const updateSetting = (key: keyof UserProfile['settings'], value: any) => {
@@ -92,25 +101,78 @@ const Settings: React.FC = () => {
         alert("Pantry cleared.");
       }
     } else {
-      if (window.confirm("Reset EVERYTHING? This deletes pantry, shopping list, and plans.")) {
-        clearItems();
-        clearShoppingList();
+      if (window.confirm("Reset EVERYTHING? This deletes your pantry, shopping list, meal plan, saved recipes and history. Your profile and settings are kept.")) {
+        clearAllData();
         alert("App reset complete.");
+        navigate('/');
       }
     }
+  };
+
+  // Turning notifications on is the moment to actually ask the browser for permission —
+  // the toggle used to just store a boolean nothing ever read.
+  const handleNotificationToggle = async (key: string, enabled: boolean) => {
+    if (enabled) {
+      const granted = await requestNotificationPermission();
+      setNotifyPermission(notificationPermission());
+      if (!granted) {
+        alert(
+          notificationPermission() === 'denied'
+            ? "Your browser is blocking notifications for this site. Allow them in your browser's site settings, then try again."
+            : 'Notifications need permission to work.'
+        );
+        return;
+      }
+    }
+    updateNestedSetting('notifications', key, enabled);
+    if (enabled) runNotificationChecks();
+  };
+
+  // Biometrics ride on top of the PIN lock — without a lock screen there's nothing for
+  // them to unlock, and the PIN always stays as the fallback so you can't be locked out.
+  const handleBiometricToggle = async (enabled: boolean) => {
+    if (!enabled) {
+      clearBiometric();
+      updateNestedSetting('security', 'biometricEnabled', false);
+      return;
+    }
+    if (!(await biometricAvailable())) {
+      alert("This device doesn't offer biometric unlock (no fingerprint reader or face unlock available to the browser).");
+      return;
+    }
+    if (!s.security.pinLock) {
+      alert('Set up a PIN first — biometrics unlock the same lock screen, and the PIN is the fallback if your fingerprint fails.');
+      return;
+    }
+    const enrolled = await enrolBiometric();
+    if (!enrolled) {
+      alert('Biometric setup was cancelled or failed.');
+      return;
+    }
+    updateNestedSetting('security', 'biometricEnabled', true);
+    alert('Biometric unlock enabled.');
   };
 
   const handlePINToggle = (enabled: boolean) => {
     if (enabled) {
       setShowPINModal(true);
     } else {
+      clearPin();   // the stored PIN goes with the toggle
       updateNestedSetting('security', 'pinLock', false);
     }
   };
 
-  const handlePINConfirm = (pin: string) => {
-    updateNestedSetting('security', 'pinLock', true);
-    alert("PIN code set successfully!");
+  // The modal used to hand us the PIN and we dropped it on the floor, so the lock could
+  // never actually challenge anyone. Store it (salted + hashed) and turn the lock on.
+  const handlePINConfirm = async (pin: string) => {
+    try {
+      await setPin(pin);
+      updateNestedSetting('security', 'pinLock', true);
+      alert("PIN set. You'll be asked for it next time you open SmartPantry.");
+    } catch (err) {
+      console.error('Failed to save PIN', err);
+      alert("Couldn't save the PIN on this device. Please try again.");
+    }
   };
 
   if (!profile) return null;
@@ -233,7 +295,7 @@ const Settings: React.FC = () => {
 
                 <div className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
                   <span className="text-sm font-medium dark:text-gray-300">Biometric Unlock</span>
-                  <div onClick={() => updateNestedSetting('security', 'biometricEnabled', !s.security.biometricEnabled)} className={`w-10 h-6 rounded-full p-1 cursor-pointer transition-all duration-200 ease-out ${s.security.biometricEnabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                  <div onClick={() => handleBiometricToggle(!s.security.biometricEnabled)} className={`w-10 h-6 rounded-full p-1 cursor-pointer transition-all duration-200 ease-out ${s.security.biometricEnabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
                     <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-200 ease-out ${s.security.biometricEnabled ? 'translate-x-4' : 'translate-x-0'}`}></div>
                   </div>
                 </div>
@@ -455,6 +517,20 @@ const Settings: React.FC = () => {
                      <option>Budget</option>
                    </select>
                  </div>
+                 <div className="flex justify-between items-center">
+                   <div>
+                     <span className="text-sm font-medium dark:text-gray-300">Photo Style</span>
+                     <p className="text-[11px] text-gray-400">How recipe images are generated</p>
+                   </div>
+                   <select
+                     value={s.aiPersona.photoStyle}
+                     onChange={(e) => updateNestedSetting('aiPersona', 'photoStyle', e.target.value)}
+                     className="bg-gray-100 dark:bg-gray-700 text-sm font-bold p-2 rounded-lg outline-none"
+                   >
+                     <option>Realistic</option>
+                     <option>Artistic</option>
+                   </select>
+                 </div>
                </div>
              </div>
 
@@ -561,7 +637,7 @@ const Settings: React.FC = () => {
              <div className="space-y-3">
                <div className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
                  <span className="text-sm font-medium dark:text-gray-300">Biometric Unlock</span>
-                 <div onClick={() => updateNestedSetting('security', 'biometricEnabled', !s.security.biometricEnabled)} className={`w-10 h-6 rounded-full p-1 cursor-pointer transition-colors ${s.security.biometricEnabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                 <div onClick={() => handleBiometricToggle(!s.security.biometricEnabled)} className={`w-10 h-6 rounded-full p-1 cursor-pointer transition-colors ${s.security.biometricEnabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
                    <div className={`w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform ${s.security.biometricEnabled ? 'translate-x-4' : ''}`}></div>
                  </div>
                </div>
@@ -587,16 +663,31 @@ const Settings: React.FC = () => {
                    { k: 'enabled', l: 'Enable All' },
                    { k: 'expiryAlerts', l: 'Expiration Alerts' },
                    { k: 'mealReminders', l: 'Meal Plan Reminders' },
-                   { k: 'missingItems', l: 'Shopping List Alerts' }
-                 ].map((item: any) => (
-                   <div key={item.k} className="flex justify-between items-center">
-                     <span className="text-sm text-gray-600 dark:text-gray-300">{item.l}</span>
-                     <div onClick={() => updateNestedSetting('notifications', item.k, !s.notifications[item.k as keyof typeof s.notifications])} className={`w-10 h-6 rounded-full p-1 cursor-pointer transition-colors ${s.notifications[item.k as keyof typeof s.notifications] ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
-                        <div className={`w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform ${s.notifications[item.k as keyof typeof s.notifications] ? 'translate-x-4' : ''}`}></div>
+                   { k: 'missingItems', l: 'Shopping List Alerts' },
+                   { k: 'weeklyReport', l: 'Weekly Report' }
+                 ].map((item: any) => {
+                   const on = s.notifications[item.k as keyof typeof s.notifications];
+                   const disabled = item.k !== 'enabled' && !s.notifications.enabled;
+                   return (
+                     <div key={item.k} className={`flex justify-between items-center transition-opacity ${disabled ? 'opacity-40' : ''}`}>
+                       <span className="text-sm text-gray-600 dark:text-gray-300">{item.l}</span>
+                       <div
+                         onClick={() => !disabled && handleNotificationToggle(item.k, !on)}
+                         className={`w-10 h-6 rounded-full p-1 transition-colors ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'} ${on ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                       >
+                          <div className={`w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform ${on ? 'translate-x-4' : ''}`}></div>
+                       </div>
                      </div>
-                   </div>
-                 ))}
+                   );
+                 })}
               </div>
+              <p className="text-[11px] text-gray-400 mt-4 leading-relaxed">
+                {notifyPermission === 'unsupported'
+                  ? 'This browser does not support notifications.'
+                  : notifyPermission === 'denied'
+                    ? 'Notifications are blocked for this site — allow them in your browser settings to turn these on.'
+                    : 'Alerts are checked when you open the app. A web app can’t notify you while it’s closed.'}
+              </p>
             </div>
 
             <div className="bg-white dark:bg-gray-800 rounded-3xl p-5 shadow-sm border border-gray-100 dark:border-gray-700">

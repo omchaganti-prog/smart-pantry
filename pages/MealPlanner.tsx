@@ -1,43 +1,65 @@
 import React, { useState, useEffect } from 'react';
 import { getItems, getMealPlan, saveMealPlan, addToShoppingList, getUserProfile } from '../services/storageService';
 import { generateMealPlan } from '../services/geminiService';
-import { WeeklyPlan, PantryItem, UserProfile } from '../types';
-import { Calendar, RefreshCw, ShoppingCart, Loader2, ChevronRight, Check, Award } from 'lucide-react';
+import { WeeklyPlan, PantryItem, UserProfile, DayPlan, Meal } from '../types';
+import { Calendar, RefreshCw, ShoppingCart, Loader2, ChevronRight, Check, Award, ChefHat } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useCookingSkill } from '../contexts/CookingSkillContext';
+import { useWaitMessage } from '../hooks/useWaitMessage';
 
 const MealPlanner: React.FC = () => {
+  const navigate = useNavigate();
   const { skillLevel, getSkillLabel } = useCookingSkill();
   const [plan, setPlan] = useState<WeeklyPlan | null>(null);
   const [items, setItems] = useState<PantryItem[]>([]);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(false);
+  const waiting = useWaitMessage(loading);
   const [activeDay, setActiveDay] = useState<string>('Monday');
   const [synced, setSynced] = useState(false);
 
   useEffect(() => {
     setItems(getItems());
-    setPlan(getMealPlan());
+    // A plan saved by an older/malformed response could be missing `days` entirely,
+    // which used to throw during render and leave this page blank on every visit.
+    // Drop anything unusable instead of crashing on it.
+    const stored = getMealPlan();
+    setPlan(stored && Array.isArray(stored.days) && stored.days.length > 0 ? stored : null);
     setUserProfile(getUserProfile());
   }, []);
+
+  const daysOf = (p: WeeklyPlan | null) => (Array.isArray(p?.days) ? p!.days : []);
+  const mealsOf = (day: DayPlan | undefined) => (Array.isArray(day?.meals) ? day!.meals : []);
+  const missingOf = (meal: Meal) => (Array.isArray(meal?.missingIngredients) ? meal.missingIngredients : []);
 
   const handleGenerate = async () => {
     setLoading(true);
     const newPlan = await generateMealPlan(items, userProfile || undefined);
-    if (newPlan) {
+    const days = daysOf(newPlan);
+    if (newPlan && days.length > 0) {
       setPlan(newPlan);
       saveMealPlan(newPlan);
-      setActiveDay(newPlan.days[0].day);
+      setActiveDay(days[0].day);
       setSynced(false);
+    } else if (newPlan) {
+      alert("The meal plan came back in an unexpected format. Please try again.");
     }
     setLoading(false);
+  };
+
+  // Same hand-off Dashboard and History use: the Chef page picks this up on mount,
+  // generates the full recipe for the dish and resolves a cooking video for it.
+  const openRecipe = (dishName: string) => {
+    sessionStorage.setItem('smart_pantry_quick_search', dishName);
+    navigate('/recipes');
   };
 
   const syncToShoppingList = () => {
     if (!plan) return;
     let count = 0;
-    plan.days.forEach(day => {
-      day.meals.forEach(meal => {
-        meal.missingIngredients.forEach(ing => {
+    daysOf(plan).forEach(day => {
+      mealsOf(day).forEach(meal => {
+        missingOf(meal).forEach(ing => {
           addToShoppingList(ing, 'For ' + meal.title);
           count++;
         });
@@ -84,6 +106,16 @@ const MealPlanner: React.FC = () => {
           >
              {loading ? 'Creating Plan...' : 'Create Weekly Plan'}
           </button>
+          {waiting.message && (
+            <div className="px-4 py-3 rounded-2xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 max-w-xs animate-in fade-in">
+              <p className="text-xs font-semibold text-amber-800 dark:text-amber-300 leading-relaxed">
+                {waiting.message}
+              </p>
+              <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 font-medium">
+                {waiting.elapsedSeconds}s elapsed — a 7-day plan takes a while.
+              </p>
+            </div>
+          )}
         </div>
       ) : (
         <div className="space-y-6">
@@ -97,7 +129,7 @@ const MealPlanner: React.FC = () => {
 
           {/* Days Scroller */}
           <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-            {plan.days.map((d, i) => (
+            {daysOf(plan).map((d, i) => (
               <button
                 key={i}
                 onClick={() => setActiveDay(d.day)}
@@ -114,26 +146,37 @@ const MealPlanner: React.FC = () => {
 
           {/* Meals for Active Day */}
           <div className="space-y-4 animate-in fade-in slide-in-from-right-4">
-            {plan.days.find(d => d.day === activeDay)?.meals.map((meal, idx) => (
+            {mealsOf(daysOf(plan).find(d => d.day === activeDay)).map((meal, idx) => (
               <div key={idx} className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
                 <div className="p-4 border-b border-gray-50 dark:border-gray-700">
                   <div className="flex justify-between items-start">
                     <span className="text-xs font-bold text-green-600 dark:text-green-400 uppercase tracking-wide">{meal.type}</span>
-                    {meal.missingIngredients.length > 0 && (
+                    {missingOf(meal).length > 0 && (
                       <span className="text-[10px] text-orange-500 bg-orange-50 dark:bg-orange-900/20 px-2 py-0.5 rounded-full">
-                        Needs {meal.missingIngredients.length} items
+                        Needs {missingOf(meal).length} items
                       </span>
                     )}
                   </div>
                   <h3 className="text-lg font-bold text-gray-800 dark:text-white mt-1">{meal.title}</h3>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{meal.description}</p>
                 </div>
-                {meal.missingIngredients.length > 0 && (
+                {missingOf(meal).length > 0 && (
                   <div className="bg-gray-50 dark:bg-gray-700/30 px-4 py-3 text-xs">
                     <span className="font-semibold text-gray-500 dark:text-gray-400">Shop for: </span>
-                    <span className="text-gray-700 dark:text-gray-300">{meal.missingIngredients.join(", ")}</span>
+                    <span className="text-gray-700 dark:text-gray-300">{missingOf(meal).join(", ")}</span>
                   </div>
                 )}
+                {/* The plan only names the dish — hand it to the Chef tab, which generates
+                    the full method and finds a cooking video for it. */}
+                <button
+                  onClick={() => openRecipe(meal.title)}
+                  className="w-full px-4 py-3 flex items-center justify-between text-sm font-bold text-green-700 dark:text-green-400 bg-green-50/60 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/40 transition-colors tap-scale"
+                >
+                  <span className="flex items-center gap-2">
+                    <ChefHat size={16} /> How to make it
+                  </span>
+                  <ChevronRight size={16} />
+                </button>
               </div>
             ))}
           </div>

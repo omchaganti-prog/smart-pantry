@@ -147,7 +147,8 @@ export const AllergyProvider: React.FC<{ children: ReactNode }> = ({ children })
     if (allergies.length === 0) return recipes;
     
     return recipes.filter(recipe => {
-      for (const ingredient of recipe.ingredients) {
+      const items = recipe.ingredientSections?.flatMap(s => s.items) || recipe.ingredients || [];
+      for (const ingredient of items) {
         const allergen = containsAllergen(ingredient.name);
         if (allergen) return false;
       }
@@ -169,8 +170,9 @@ export const AllergyProvider: React.FC<{ children: ReactNode }> = ({ children })
     
     for (const recipe of recipes) {
       let foundAllergen: string | null = null;
-      
-      for (const ingredient of recipe.ingredients) {
+      const items = recipe.ingredientSections?.flatMap(s => s.items) || recipe.ingredients || [];
+
+      for (const ingredient of items) {
         foundAllergen = containsAllergen(ingredient.name);
         if (foundAllergen) break;
       }

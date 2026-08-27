@@ -8,6 +8,9 @@ interface VideoPlayerProps {
   isFullscreen?: boolean;
 }
 
+const isEmbeddedVideo = (url: string): boolean =>
+  /^https:\/\/(www\.)?youtube(-nocookie)?\.com\/embed\//.test(url);
+
 const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoUrl, title, onClose, isFullscreen = false }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -169,6 +172,32 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoUrl, title, onClose, isF
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
+
+  // Cooking videos come from YouTube, which can't play through a <video> tag — hand
+  // those to an iframe with YouTube's own controls. Direct MP4s keep the custom player.
+  if (isEmbeddedVideo(videoUrl)) {
+    return (
+      <div className="relative bg-black rounded-2xl overflow-hidden shadow-xl">
+        <iframe
+          src={videoUrl}
+          title={title || 'Recipe video'}
+          className="w-full aspect-video"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+          loading="lazy"
+        />
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full backdrop-blur-sm hover:bg-black/80 transition-colors"
+            aria-label="Close video"
+          >
+            <X size={16} />
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div

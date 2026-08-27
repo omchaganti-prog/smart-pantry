@@ -152,6 +152,31 @@ const DEFAULT_PROFILE: UserProfile = {
   updatedAt: new Date().toISOString()
 };
 
+/**
+ * Wipes the user's saved data. "Reset everything" used to clear only the pantry and
+ * shopping list despite promising to remove plans too, leaving stale meal plans,
+ * favourites and history behind.
+ *
+ * Deliberately keeps the profile (allergies, skill, theme) — silently dropping someone's
+ * allergy list would be the dangerous kind of surprise.
+ */
+export const clearAllData = (): void => {
+  [
+    STORAGE_KEY,
+    SHOPPING_KEY,
+    MEAL_PLAN_KEY,
+    'smart_pantry_favorites',
+    'smart_pantry_saved_for_later',
+    'smart_pantry_recipes_cache',
+    'smartpantry_recently_viewed',
+    'smart_pantry_preferences',
+  ].forEach(key => localStorage.removeItem(key));
+
+  ['smart_pantry_recipe_state', 'smart_pantry_quick_search'].forEach(key =>
+    sessionStorage.removeItem(key)
+  );
+};
+
 export const getUserProfile = (): UserProfile => {
   try {
     const data = localStorage.getItem(PROFILE_KEY);

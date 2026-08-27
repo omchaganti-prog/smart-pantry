@@ -1,8 +1,8 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { getItems, addToShoppingList, getUserProfile } from '../services/storageService';
 import { suggestRecipes, generateRecipeFromDish } from '../services/geminiService';
-import { Recipe, RecipePreferences, PantryItem, RecipeIngredient, UserProfile } from '../types';
+import { Recipe, RecipePreferences, PantryItem, IngredientItem, IngredientSection, UserProfile } from '../types';
 import { ChefHat, Clock, AlertCircle, Loader2, Filter, Flame, CheckCircle2, XCircle, ChevronDown, ChevronUp, Leaf, DollarSign, Heart, ShoppingCart, Plus, Sparkles, Search, ArrowRight, Users, UtensilsCrossed, AlertTriangle, ImageOff, Award, Bookmark, Play, HelpCircle, Timer } from 'lucide-react';
 import { useCookingSkill } from '../contexts/CookingSkillContext';
 import { useSpiceTolerance } from '../contexts/SpiceToleranceContext';
@@ -13,9 +13,103 @@ import { useRecentlyViewed } from '../contexts/RecentlyViewedContext';
 import { useUndo } from '../contexts/UndoContext';
 import VideoPlayer from '../components/VideoPlayer';
 import CookingTimer from '../components/CookingTimer';
+import { useWaitMessage } from '../hooks/useWaitMessage';
+import { takeQueuedRecipe } from '../services/openRecipeService';
 
 const RECIPE_STATE_KEY = 'smart_pantry_recipe_state';
 const PREFS_KEY = 'smart_pantry_preferences';
+
+// Pollinations' anonymous tier allows exactly ONE in-flight request per IP — a burst of
+// one-image-per-card returns 429 ("Queue full for IP") and the losers used to fall
+// straight to "Image unavailable". So image loads run strictly one at a time.
+const IMAGE_GAP_MS = 300;        // breather between images
+const IMAGE_TIMEOUT_MS = 25000;  // generating a fresh image can take ~10-20s
+const IMAGE_MAX_ATTEMPTS = 3;
+
+type ImageTask = { run: () => void; cancelled: boolean };
+
+const imageQueue: ImageTask[] = [];
+let imageBusy = false;
+
+const startNextImage = () => {
+  if (imageBusy) return;
+  let task = imageQueue.shift();
+  while (task?.cancelled) task = imageQueue.shift();
+  if (!task) return;
+  imageBusy = true;
+  task.run();
+};
+
+// Returns a cancel/release handle. A watchdog releases the slot regardless, so a card
+// unmounted mid-request can never stall every image behind it.
+const acquireImageSlot = (start: () => void): (() => void) => {
+  let settled = false;
+  let watchdog: ReturnType<typeof setTimeout> | undefined;
+
+  const release = () => {
+    if (settled) return;
+    settled = true;
+    task.cancelled = true;
+    if (watchdog) clearTimeout(watchdog);
+    if (started) {
+      setTimeout(() => { imageBusy = false; startNextImage(); }, IMAGE_GAP_MS);
+    }
+  };
+
+  let started = false;
+  const task: ImageTask = {
+    cancelled: false,
+    run: () => {
+      started = true;
+      watchdog = setTimeout(release, IMAGE_TIMEOUT_MS);
+      start();
+    },
+  };
+
+  imageQueue.push(task);
+  startNextImage();
+  return release;
+};
+
+// LoremFlickr takes comma-separated tags and always answers with a real photo.
+const toPhotoTags = (text: string): string => {
+  const tags = text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 2)
+    .slice(0, 4);
+  return [...tags, 'food'].join(',');
+};
+
+// Escalating sources, best-looking first. Pollinations generates an image of the actual
+// dish but its anonymous tier throttles hard (one in-flight request per IP), so a real
+// stock photo backs it up rather than letting a card end up with no image at all.
+// Settings → AI Chef → Photo Style
+const PHOTO_STYLE_PROMPTS: Record<string, string> = {
+  Realistic: 'professional food photography 4k natural lighting',
+  Artistic: 'artistic food illustration, painterly, vibrant colours, stylised',
+};
+
+const buildRecipeImageUrl = (
+  keyword: string | undefined,
+  title: string,
+  attempt: number,
+  photoStyle: string = 'Realistic'
+): string => {
+  const subject = keyword || title;
+  const style = PHOTO_STYLE_PROMPTS[photoStyle] ?? PHOTO_STYLE_PROMPTS.Realistic;
+  switch (attempt) {
+    case 0:
+      return `https://image.pollinations.ai/prompt/${encodeURIComponent(`${subject} ${style}`)}?width=800&height=450&nologo=true`;
+    case 1:
+      // tags are already reduced to [a-z0-9] words; the commas must stay literal or
+      // LoremFlickr reads the whole thing as a single tag
+      return `https://loremflickr.com/800/450/${toPhotoTags(subject)}`;
+    default:
+      return `https://loremflickr.com/800/450/food,meal,dish`;
+  }
+};
 
 const loadPersistedPrefs = (): RecipePreferences | null => {
   if (typeof window === 'undefined') return null;
@@ -23,6 +117,76 @@ const loadPersistedPrefs = (): RecipePreferences | null => {
     const stored = localStorage.getItem(PREFS_KEY);
     return stored ? JSON.parse(stored) : null;
   } catch { return null; }
+};
+
+// The AI returns recipe-defined `ingredientSections`; older cached recipes may still
+// carry the legacy flat `ingredients` array. Normalize both into sections.
+// Accept the key variants the model uses ("ingredient"/"amount", or a bare string) and
+// drop anything still nameless — a nameless item renders as a blank row with a lone
+// "Missing" under it. Recipes cached before this fix are cleaned up on the way in.
+const UNIT_WORDS =
+  'g|kg|mg|ml|l|oz|lb|lbs|cup|cups|tbsp|tbs|tsp|tablespoons?|teaspoons?|cloves?|pcs|pieces?|cans?|slices?|pinch|dash|sticks?|bunch|handful|packets?|bags?';
+// a trailing word counts as a unit only if it is one, so "3 ripe bananas" keeps its name
+const INGREDIENT_STRING = new RegExp(`^\\s*([\\d./½¼¾⅓⅔]+(?:\\s*(?:${UNIT_WORDS})\\b)?)?\\s*(.*)$`, 'i');
+
+const readIngredient = (raw: any): IngredientItem | null => {
+  if (typeof raw === 'string') {
+    const match = raw.trim().match(INGREDIENT_STRING);
+    const name = (match?.[2] ?? raw).trim();
+    return name ? ({ name, quantity: (match?.[1] ?? '').trim() } as IngredientItem) : null;
+  }
+  const i = raw ?? {};
+  // `title` is deliberately not a candidate — it belongs to sections, and treating it as
+  // an ingredient name is what turned a nested "Cake Ingredients" group into a lone row.
+  const name = [i.name, i.ingredient, i.item, i.label]
+    .find((v: any) => typeof v === 'string' && v.trim())?.trim();
+  if (!name) return null;
+  const quantity = [i.quantity, i.amount, i.qty, i.measure]
+    .find((v: any) => (typeof v === 'string' && v.trim()) || typeof v === 'number');
+  return { ...i, name, quantity: quantity === undefined ? '' : String(quantity).trim() };
+};
+
+// The model sometimes nests a section inside a section — an "item" that is really
+// { title: "Cake Ingredients", items: [...] }. Promote those to real sections instead
+// of letting them collapse into a single nameless row.
+const expandNestedSections = (sections: any[]): any[] =>
+  sections.flatMap(section => {
+    const items: any[] = Array.isArray(section?.items) ? section.items : [];
+    const groups = items.filter(i => i && Array.isArray(i.items));
+    if (groups.length === 0) return [section];
+
+    const loose = items.filter(i => !(i && Array.isArray(i.items)));
+    return [
+      ...(loose.length > 0 ? [{ title: section.title, items: loose }] : []),
+      ...groups.map(g => ({ title: g.title ?? g.name ?? section.title, items: g.items })),
+    ];
+  });
+
+const getIngredientSections = (recipe: Recipe): IngredientSection[] => {
+  const raw = Array.isArray(recipe.ingredientSections) && recipe.ingredientSections.length > 0
+    ? recipe.ingredientSections
+    : (recipe.ingredients ?? []).length > 0
+      ? [{ title: 'Ingredients', items: recipe.ingredients ?? [] }]
+      : [];
+
+  return expandNestedSections(raw)
+    .filter(s => Array.isArray(s?.items))
+    .map(s => ({
+      title: typeof s.title === 'string' && s.title.trim() ? s.title : 'Ingredients',
+      items: s.items.map(readIngredient).filter(Boolean) as IngredientItem[],
+    }))
+    .filter(s => s.items.length > 0);
+};
+
+const getAllIngredients = (recipe: Recipe): IngredientItem[] =>
+  getIngredientSections(recipe).flatMap(s => s.items);
+
+// `quantity` (+ optional `unit`) is the current shape; `amount` is the legacy one.
+const getIngredientAmount = (ing: IngredientItem): string => {
+  const qty = String(ing.quantity ?? (ing as any).amount ?? '').trim();
+  const unit = ing.unit?.trim();
+  if (!unit || qty.toLowerCase().includes(unit.toLowerCase())) return qty;
+  return `${qty} ${unit}`.trim();
 };
 
 const Recipes: React.FC = () => {
@@ -41,9 +205,11 @@ const Recipes: React.FC = () => {
   const [timerStepName, setTimerStepName] = useState<string | undefined>();
   const [timerPosition, setTimerPosition] = useState<{ x: number; y: number } | undefined>();
   
-  // Get the user's selected servings for a recipe (defaults to recipe's base servings)
+  // Servings start at 1 so the number you pick IS the number of servings you get:
+  // 1 = one serving, 2 = two, and so on. The AI writes its amounts for
+  // `recipe.servings`, so that stays the base everything is scaled *from*.
   const getSelectedServings = (recipe: Recipe): number => {
-    return recipeServings[recipe.id] ?? recipe.servings;
+    return recipeServings[recipe.id] ?? 1;
   };
 
   // Update servings for a specific recipe
@@ -137,25 +303,6 @@ const Recipes: React.FC = () => {
     return formatAmount(scaledValue, unit);
   };
 
-  // Scale nutrition value (handles strings like "25g" or numbers)
-  const scaleNutrition = (value: string | number, baseServings: number, targetServings: number): string | number => {
-    if (baseServings === targetServings) return value;
-    const ratio = targetServings / baseServings;
-    
-    if (typeof value === 'number') {
-      return Math.round(value * ratio);
-    }
-    
-    const match = String(value).match(/^([\d.]+)\s*(.*)$/);
-    if (match) {
-      const num = parseFloat(match[1]);
-      const unit = match[2];
-      const scaled = Math.round(num * ratio * 10) / 10;
-      return `${scaled}${unit}`;
-    }
-    return value;
-  };
-
   const extractTimeFromStep = (step: string): number | null => {
     const patterns = [
       /(\d+)\s*(?:to\s*\d+\s*)?minutes?/i,
@@ -202,6 +349,9 @@ const Recipes: React.FC = () => {
 
   const [recipes, setRecipes] = useState<Recipe[]>(saved?.recipes || []);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const waiting = useWaitMessage(loading);
+  const waitingMore = useWaitMessage(loadingMore);
   const [hasGenerated, setHasGenerated] = useState(saved?.hasGenerated || false);
   const [items, setItems] = useState<PantryItem[]>([]);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -268,7 +418,7 @@ const Recipes: React.FC = () => {
           if (recipe.healthScore !== undefined && recipe.healthScore < 6) return false;
           break;
         case 'PantryHero':
-          const missingCount = recipe.ingredients?.filter(i => i.status === 'Missing').length || 0;
+          const missingCount = getAllIngredients(recipe).filter(i => i.status === 'Missing').length;
           if (missingCount > 3) return false;
           break;
       }
@@ -337,7 +487,7 @@ const Recipes: React.FC = () => {
           modeMatch = recipe.healthScore !== undefined && recipe.healthScore >= 6;
           break;
         case 'PantryHero':
-          const missingCount = recipe.ingredients?.filter(i => i.status === 'Missing').length || 0;
+          const missingCount = getAllIngredients(recipe).filter(i => i.status === 'Missing').length;
           modeMatch = missingCount <= 3;
           break;
         case 'LeftoverFusion':
@@ -395,6 +545,19 @@ const Recipes: React.FC = () => {
   useEffect(() => {
     setItems(getItems());
     setUserProfile(getUserProfile());
+  }, []);
+
+  // Opening a saved recipe (Recently Viewed / Favourites / Saved for Later) shows the
+  // stored one as-is. Regenerating it from the title gave a different dish each time.
+  useEffect(() => {
+    const stored = takeQueuedRecipe();
+    if (stored) {
+      setRecipes([stored]);
+      setExpandedRecipe(stored.id);
+      setHasGenerated(true);
+      setIsSearchingDish(true);   // don't filter a recipe the user explicitly opened
+      setDishSearch(stored.title);
+    }
   }, []);
 
   // Check for quick search from Recently Viewed
@@ -470,6 +633,28 @@ const Recipes: React.FC = () => {
     setHasGenerated(true);
   };
 
+  // Fetches another batch and appends it, telling the AI what's already on screen so
+  // it doesn't repeat dishes. Useful when the allergy/skill/spice filters thin the list.
+  const handleGenerateMore = async () => {
+    if (items.length === 0) return;
+    setLoadingMore(true);
+    try {
+      const seen = recipes.map(r => r.title);
+      const more = await suggestRecipes(items, preferences, userProfile || undefined, seen);
+      const seenLower = new Set(seen.map(t => t.toLowerCase().trim()));
+      const fresh = (more || []).filter(r => r?.title && !seenLower.has(r.title.toLowerCase().trim()));
+      if (fresh.length === 0) {
+        alert("Couldn't find any new recipes for this pantry — try changing your preferences or adding items.");
+      } else {
+        setRecipes(prev => [...prev, ...fresh]);
+      }
+    } catch (err) {
+      console.error("Error generating more recipes:", err);
+      alert("Failed to load more recipes. Please try again.");
+    }
+    setLoadingMore(false);
+  };
+
   const handleDishSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!dishSearch.trim()) return;
@@ -511,15 +696,15 @@ const Recipes: React.FC = () => {
     }
   };
 
-  const handleAddToCart = (ingredient: RecipeIngredient) => {
-    const amountToAdd = ingredient.amountToBuy || ingredient.amount;
+  const handleAddToCart = (ingredient: IngredientItem) => {
+    const amountToAdd = ingredient.amountToBuy || getIngredientAmount(ingredient) || '1 unit';
     const nameToAdd = ingredient.name + (ingredient.amountToBuy ? " (Partial fill)" : "");
     addToShoppingList(nameToAdd, amountToAdd);
     setAddedToCart(prev => new Set(prev).add(ingredient.name));
   };
 
   const handleBulkAddToCart = (recipe: Recipe) => {
-    const missing = recipe.ingredients.filter(i => i.status === 'Missing' || i.status === 'Partial');
+    const missing = getAllIngredients(recipe).filter(i => i.status === 'Missing' || i.status === 'Partial');
     let count = 0;
     missing.forEach(ing => {
       if (!addedToCart.has(ing.name)) {
@@ -541,15 +726,119 @@ const Recipes: React.FC = () => {
     }
   };
 
+  // Looks up a real cooking video for the dish. Only mounts when a card is expanded,
+  // so we don't hit the lookup for recipes nobody opened.
+  // presetUrl is the video pinned to the recipe when it was generated. When it's there
+  // we never look anything up, so the same recipe always shows the same video.
+  const RecipeVideo = ({
+    dishName,
+    presetUrl,
+    presetTitle,
+  }: { dishName: string; presetUrl?: string; presetTitle?: string }) => {
+    const [embedUrl, setEmbedUrl] = useState<string | null>(presetUrl ?? null);
+    const [watchUrl, setWatchUrl] = useState<string | null>(null);
+    const [videoTitle, setVideoTitle] = useState<string | null>(presetTitle ?? null);
+    const [state, setState] = useState<'loading' | 'ready' | 'failed'>(presetUrl ? 'ready' : 'loading');
+
+    useEffect(() => {
+      if (presetUrl) return;
+      let cancelled = false;
+      (async () => {
+        try {
+          const res = await fetch('/api/gemini/find-video', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dishName }),
+          });
+          if (!res.ok) throw new Error('lookup failed');
+          const data = await res.json();
+          if (cancelled) return;
+          setWatchUrl(data.watchUrl ?? null);
+          setVideoTitle(data.title ?? null);
+          setEmbedUrl(data.embedUrl ?? null);
+          setState(data.embedUrl ? 'ready' : 'failed');
+        } catch {
+          if (!cancelled) setState('failed');
+        }
+      })();
+      return () => { cancelled = true; };
+    }, [dishName, presetUrl]);
+
+    return (
+      <div className="mb-6 animate-in fade-in duration-500">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="p-2 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-lg">
+            <Play size={16} />
+          </div>
+          <div className="min-w-0">
+            <h4 className="font-bold text-gray-800 dark:text-gray-200 text-sm">Watch How It's Made</h4>
+            {videoTitle && (
+              <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{videoTitle}</p>
+            )}
+          </div>
+        </div>
+
+        {state === 'loading' && (
+          <div className="w-full aspect-video rounded-2xl bg-gray-200 dark:bg-gray-700 animate-pulse flex items-center justify-center">
+            <Loader2 className="animate-spin text-gray-400" size={24} />
+          </div>
+        )}
+
+        {state === 'ready' && embedUrl && (
+          <VideoPlayer videoUrl={embedUrl} title={dishName} />
+        )}
+
+        {state === 'failed' && (
+          <a
+            href={watchUrl || `https://www.youtube.com/results?search_query=${encodeURIComponent(dishName + ' recipe')}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="flex items-center justify-center gap-2 w-full py-4 rounded-2xl bg-gray-100 dark:bg-gray-700/50 text-gray-700 dark:text-gray-300 font-bold text-sm hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+          >
+            <Play size={16} /> Search YouTube for this recipe
+          </a>
+        )}
+      </div>
+    );
+  };
+
   // Improved Image Component
   const RecipeImage = ({ keyword, title }: { keyword?: string; title: string }) => {
     const [isLoaded, setIsLoaded] = useState(false);
     const [hasError, setHasError] = useState(false);
-    // Use Pollinations AI for reliable, generated food images based on keyword
-    // Fallback to Unsplash Source if Pollinations fails (though Unsplash source is deprecated, Pollinations is solid for this)
-    const imageUrl = keyword 
-      ? `https://image.pollinations.ai/prompt/${encodeURIComponent(keyword)}%20professional%20food%20photography%204k%20lighting?width=800&height=450&nologo=true`
-      : `https://image.pollinations.ai/prompt/${encodeURIComponent(title)}%20food?width=800&height=450`;
+    const [attempt, setAttempt] = useState(0);
+    const [imageUrl, setImageUrl] = useState<string | null>(null);
+
+    const releaseSlot = useRef<(() => void) | null>(null);
+
+    useEffect(() => {
+      const url = buildRecipeImageUrl(keyword, title, attempt, userProfile?.settings?.aiPersona?.photoStyle);
+      // Only the Pollinations attempt has to queue; the stock-photo fallbacks are
+      // happy to load in parallel.
+      if (attempt > 0) {
+        releaseSlot.current = null;
+        setImageUrl(url);
+        return;
+      }
+      const release = acquireImageSlot(() => setImageUrl(url));
+      releaseSlot.current = release;
+      return release;   // unmounting, or moving to the next attempt, frees the slot
+    }, [keyword, title, attempt, userProfile?.settings?.aiPersona?.photoStyle]);
+
+    const handleLoaded = () => {
+      setIsLoaded(true);
+      releaseSlot.current?.();
+    };
+
+    const handleFailed = () => {
+      releaseSlot.current?.();
+      if (attempt + 1 < IMAGE_MAX_ATTEMPTS) {
+        setAttempt(a => a + 1);   // re-queues via the effect
+      } else {
+        setHasError(true);
+      }
+    };
 
     return (
       <div className="relative w-full aspect-video overflow-hidden bg-gray-100 dark:bg-gray-800">
@@ -563,14 +852,14 @@ const Recipes: React.FC = () => {
              <ImageOff className="text-gray-400 mb-2" size={32} />
              <span className="text-xs text-gray-500 font-medium">Image unavailable</span>
           </div>
-        ) : (
+        ) : imageUrl && (
           <img
+            key={imageUrl}
             src={imageUrl}
             alt={title}
             className={`w-full h-full object-cover transition-all duration-700 hover:scale-105 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
-            onLoad={() => setIsLoaded(true)}
-            onError={() => setHasError(true)}
-            loading="lazy"
+            onLoad={handleLoaded}
+            onError={handleFailed}
           />
         )}
         {/* Cinematic Gradient Overlay */}
@@ -701,6 +990,16 @@ const Recipes: React.FC = () => {
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 max-w-[200px]">
             AI is checking your pantry against culinary databases.
           </p>
+          {waiting.message && (
+            <div className="mt-5 px-4 py-3 rounded-2xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 max-w-[280px] animate-in fade-in">
+              <p className="text-xs font-semibold text-amber-800 dark:text-amber-300 leading-relaxed">
+                {waiting.message}
+              </p>
+              <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 font-medium">
+                {waiting.elapsedSeconds}s elapsed
+              </p>
+            </div>
+          )}
         </div>
       )}
 
@@ -788,7 +1087,7 @@ const Recipes: React.FC = () => {
       <div data-walkthrough="recipe-cards" className={`space-y-8 transition-all duration-300 ${isAnimating ? 'opacity-50 scale-[0.98]' : 'opacity-100 scale-100'}`}>
         {filteredRecipes.map((recipe, index) => {
           const isExpanded = expandedRecipe === recipe.id;
-          const missingItems = recipe.ingredients.filter(i => i.status === 'Missing' || i.status === 'Partial');
+          const missingItems = getAllIngredients(recipe).filter(i => i.status === 'Missing' || i.status === 'Partial');
           const missingCount = missingItems.length;
 
           return (
@@ -819,8 +1118,8 @@ const Recipes: React.FC = () => {
                         }`}>
                           <span className="text-xs font-bold">{recipe.matchScore}%</span>
                       </div>
-                      {/* Video Badge */}
-                      {recipe.videoUrl && (
+                      {/* Video Badge — every recipe gets a video looked up on open */}
+                      {(
                         <div className="px-3 py-1.5 rounded-full shadow-lg bg-red-500 text-white flex items-center gap-1.5">
                           <Play size={11} fill="currentColor" />
                           <span className="text-xs font-bold">Video</span>
@@ -971,11 +1270,9 @@ const Recipes: React.FC = () => {
                           <p className="text-xs font-bold text-green-700 dark:text-green-400 uppercase tracking-wide">Servings</p>
                           <p className="text-lg font-extrabold text-gray-800 dark:text-white">
                             {getSelectedServings(recipe)}
-                            {getSelectedServings(recipe) !== recipe.servings && (
-                              <span className="text-xs font-medium text-gray-500 dark:text-gray-400 ml-1">
-                                (base: {recipe.servings})
-                              </span>
-                            )}
+                            <span className="text-xs font-medium text-gray-500 dark:text-gray-400 ml-1">
+                              {getSelectedServings(recipe) === 1 ? 'serving' : 'servings'}
+                            </span>
                           </p>
                         </div>
                       </div>
@@ -1022,7 +1319,8 @@ const Recipes: React.FC = () => {
                               {recipe.servingScaleMultipliers.map((scale, idx) => (
                                 <div key={idx} className="bg-white/60 dark:bg-gray-800/40 rounded-lg p-2 text-center">
                                   <p className="text-sm font-bold text-amber-800 dark:text-amber-300">{scale.multiplier}</p>
-                                  <p className="text-xs text-amber-600 dark:text-amber-400">{scale.servings} servings</p>
+                                  {/* servings count follows the base-1 selector: 1x = 1 serving, 2x = 2, 3x = 3 */}
+                                  <p className="text-xs text-amber-600 dark:text-amber-400">{idx + 1} {idx === 0 ? 'serving' : 'servings'}</p>
                                   <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">{scale.yield}</p>
                                 </div>
                               ))}
@@ -1033,17 +1331,7 @@ const Recipes: React.FC = () => {
                     )}
 
                     {/* VIDEO PLAYER */}
-                    {recipe.videoUrl && (
-                      <div className="mb-6 animate-in fade-in duration-500">
-                        <div className="flex items-center gap-2 mb-3">
-                          <div className="p-2 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-lg">
-                            <Play size={16} />
-                          </div>
-                          <h4 className="font-bold text-gray-800 dark:text-gray-200 text-sm">Watch How It's Made</h4>
-                        </div>
-                        <VideoPlayer videoUrl={recipe.videoUrl} title={recipe.title} />
-                      </div>
-                    )}
+                    <RecipeVideo dishName={recipe.title} presetUrl={recipe.videoUrl} presetTitle={(recipe as any).videoTitle} />
                     
                     {/* ALLERGY WARNING BANNER */}
                     {recipe.allergenWarning && (
@@ -1071,7 +1359,7 @@ const Recipes: React.FC = () => {
                              <li key={i} className="flex justify-between items-center text-sm border-b border-gray-200 dark:border-gray-600/50 last:border-0 pb-2 last:pb-0">
                                <span className="text-gray-600 dark:text-gray-300">{ing.name}</span>
                                <span className="font-bold text-gray-800 dark:text-gray-200 text-xs bg-white dark:bg-gray-800 px-2 py-1 rounded-md shadow-sm transition-all duration-200">
-                                 +{scaleAmount(ing.amountToBuy || ing.amount, recipe.servings, getSelectedServings(recipe))}
+                                 +{scaleAmount(ing.amountToBuy || getIngredientAmount(ing), recipe.servings, getSelectedServings(recipe))}
                                </span>
                              </li>
                           ))}
@@ -1085,67 +1373,48 @@ const Recipes: React.FC = () => {
                       </div>
                     )}
 
-                    {/* Ingredients - Grouped by Category */}
+                    {/* Ingredients - grouped by the recipe's own sections */}
                     <div className="mb-8">
                       <h4 className="font-heading font-bold text-gray-800 dark:text-white text-lg mb-4">Ingredients</h4>
-                      {(() => {
-                        const categoryOrder: string[] = ['Dry Ingredients', 'Wet Ingredients', 'Seasonings & Spices', 'Add-ins / Optional'];
-                        const grouped = recipe.ingredients.reduce((acc, ing) => {
-                          const cat = ing.category || 'Other';
-                          if (!acc[cat]) acc[cat] = [];
-                          acc[cat].push(ing);
-                          return acc;
-                        }, {} as Record<string, typeof recipe.ingredients>);
-                        
-                        const sortedCategories = Object.keys(grouped).sort((a, b) => {
-                          const aIdx = categoryOrder.indexOf(a);
-                          const bIdx = categoryOrder.indexOf(b);
-                          if (aIdx === -1 && bIdx === -1) return 0;
-                          if (aIdx === -1) return 1;
-                          if (bIdx === -1) return -1;
-                          return aIdx - bIdx;
-                        });
-
-                        return sortedCategories.map((category) => (
-                          <div key={category} className="mb-5 last:mb-0">
-                            <h5 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-2">
-                              <span className="w-2 h-2 rounded-full bg-green-500/60"></span>
-                              {category}
-                            </h5>
-                            <ul className="space-y-2">
-                              {grouped[category].map((ing, i) => (
-                                <li key={i} className={`flex items-start gap-3 p-3 rounded-xl transition-colors ${ing.isAllergen ? 'bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800' : 'hover:bg-gray-50 dark:hover:bg-gray-700/30'}`}>
-                                   <div className={`mt-0.5 ${ing.isAllergen ? 'text-red-500' : ing.status === 'Have' ? 'text-green-500' : 'text-gray-300'}`}>
-                                      {ing.isAllergen ? <AlertTriangle size={18} /> : ing.status === 'Have' ? <CheckCircle2 size={18} /> : <div className="w-4 h-4 rounded-full border-2 border-gray-300 dark:border-gray-600" />}
+                      {getIngredientSections(recipe).map((section, si) => (
+                        <div key={si} className="mb-5 last:mb-0">
+                          <h5 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-green-500/60"></span>
+                            {section.title}
+                          </h5>
+                          <ul className="space-y-2">
+                            {section.items.map((ing, i) => (
+                              <li key={i} className={`flex items-start gap-3 p-3 rounded-xl transition-colors ${ing.isAllergen ? 'bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800' : 'hover:bg-gray-50 dark:hover:bg-gray-700/30'}`}>
+                                 <div className={`mt-0.5 ${ing.isAllergen ? 'text-red-500' : ing.status === 'Have' ? 'text-green-500' : 'text-gray-300'}`}>
+                                    {ing.isAllergen ? <AlertTriangle size={18} /> : ing.status === 'Have' ? <CheckCircle2 size={18} /> : <div className="w-4 h-4 rounded-full border-2 border-gray-300 dark:border-gray-600" />}
+                                 </div>
+                                 <div className="flex-1">
+                                   <div className="flex justify-between items-baseline gap-2">
+                                     <span className={`text-sm font-medium ${ing.isAllergen ? 'text-red-700 dark:text-red-400 font-bold' : ing.status === 'Have' ? 'text-gray-800 dark:text-gray-200' : 'text-gray-500 dark:text-gray-400'}`}>
+                                       {ing.name}
+                                       {ing.isOptional && <span className="ml-1 text-[10px] text-gray-400 dark:text-gray-500 font-normal">(optional)</span>}
+                                     </span>
+                                     <span className="text-sm font-bold text-gray-800 dark:text-gray-300 transition-all duration-200 whitespace-nowrap">{scaleAmount(getIngredientAmount(ing), recipe.servings, getSelectedServings(recipe))}</span>
                                    </div>
-                                   <div className="flex-1">
-                                     <div className="flex justify-between items-baseline gap-2">
-                                       <span className={`text-sm font-medium ${ing.isAllergen ? 'text-red-700 dark:text-red-400 font-bold' : ing.status === 'Have' ? 'text-gray-800 dark:text-gray-200' : 'text-gray-500 dark:text-gray-400'}`}>
-                                         {ing.name}
-                                         {ing.isOptional && <span className="ml-1 text-[10px] text-gray-400 dark:text-gray-500 font-normal">(optional)</span>}
-                                       </span>
-                                       <span className="text-sm font-bold text-gray-800 dark:text-gray-300 transition-all duration-200 whitespace-nowrap">{scaleAmount(ing.amount, recipe.servings, getSelectedServings(recipe))}</span>
-                                     </div>
-                                     {ing.prepNote && (
-                                       <p className="text-xs text-blue-500 dark:text-blue-400 mt-0.5 italic">{ing.prepNote}</p>
-                                     )}
-                                     {ing.cautionNote && (
-                                       <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5 flex items-center gap-1">
-                                         <AlertTriangle size={10} /> {ing.cautionNote}
-                                       </p>
-                                     )}
-                                     {ing.status !== 'Have' && !ing.isAllergen && (
-                                       <p className="text-xs text-orange-500 font-medium mt-0.5">
-                                         {ing.substitute ? `Sub: ${ing.substitute}` : `Missing`}
-                                       </p>
-                                     )}
-                                   </div>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        ));
-                      })()}
+                                   {ing.prepNote && (
+                                     <p className="text-xs text-blue-500 dark:text-blue-400 mt-0.5 italic">{ing.prepNote}</p>
+                                   )}
+                                   {ing.cautionNote && (
+                                     <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5 flex items-center gap-1">
+                                       <AlertTriangle size={10} /> {ing.cautionNote}
+                                     </p>
+                                   )}
+                                   {ing.status !== 'Have' && !ing.isAllergen && (
+                                     <p className="text-xs text-orange-500 font-medium mt-0.5">
+                                       {ing.substitute ? `Sub: ${ing.substitute}` : `Missing`}
+                                     </p>
+                                   )}
+                                 </div>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ))}
                     </div>
 
                     {/* Instructions */}
@@ -1193,19 +1462,26 @@ const Recipes: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Macros Footer */}
-                    <div className="mt-8 pt-6 border-t border-gray-100 dark:border-gray-700 grid grid-cols-4 gap-2">
-                       {[
-                         { l: 'Cal', v: scaleNutrition(recipe.nutrition.calories, recipe.servings, getSelectedServings(recipe)) },
-                         { l: 'Prot', v: scaleNutrition(recipe.nutrition.protein, recipe.servings, getSelectedServings(recipe)) },
-                         { l: 'Carb', v: scaleNutrition(recipe.nutrition.carbs, recipe.servings, getSelectedServings(recipe)) },
-                         { l: 'Fat', v: scaleNutrition(recipe.nutrition.fat, recipe.servings, getSelectedServings(recipe)) },
-                       ].map((m, idx) => (
-                         <div key={idx} className="text-center p-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{m.l}</p>
-                           <p className="text-sm font-extrabold text-gray-800 dark:text-white transition-all duration-200">{m.v}</p>
-                         </div>
-                       ))}
+                    {/* Macros Footer — these are PER SERVING, so they do not move with the
+                        servings selector. Cooking 3 servings doesn't change what one serving
+                        contains; only the ingredient amounts above scale. */}
+                    <div className="mt-8 pt-6 border-t border-gray-100 dark:border-gray-700">
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3 text-center">
+                        Nutrition per serving
+                      </p>
+                      <div className="grid grid-cols-4 gap-2">
+                         {[
+                           { l: 'Cal', v: recipe.nutrition.calories },
+                           { l: 'Prot', v: recipe.nutrition.protein },
+                           { l: 'Carb', v: recipe.nutrition.carbs },
+                           { l: 'Fat', v: recipe.nutrition.fat },
+                         ].map((m, idx) => (
+                           <div key={idx} className="text-center p-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{m.l}</p>
+                             <p className="text-sm font-extrabold text-gray-800 dark:text-white">{m.v || '—'}</p>
+                           </div>
+                         ))}
+                      </div>
                     </div>
 
                   </div>
@@ -1216,12 +1492,36 @@ const Recipes: React.FC = () => {
         })}
         
         {hasGenerated && (
-          <div className="pt-4 pb-8 text-center">
-            <button 
-               onClick={() => { 
-                 setRecipes([]); 
-                 setHasGenerated(false); 
-                 setDishSearch(""); 
+          <div className="pt-4 pb-8 text-center space-y-4">
+            {recipes.length > 0 && !isSearchingDish && (
+              <div>
+                <button
+                  onClick={handleGenerateMore}
+                  disabled={loadingMore || loading}
+                  className="w-full py-4 rounded-2xl bg-white dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 font-bold text-sm flex items-center justify-center gap-2 hover:border-green-400 hover:text-green-600 dark:hover:text-green-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors tap-scale"
+                >
+                  {loadingMore ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" /> Finding more recipes…
+                    </>
+                  ) : (
+                    <>
+                      <Plus size={18} /> Show 3 more recipes
+                    </>
+                  )}
+                </button>
+                {waitingMore.message && (
+                  <p className="text-xs font-semibold text-amber-700 dark:text-amber-400 mt-2 animate-in fade-in">
+                    {waitingMore.message} <span className="font-medium opacity-70">({waitingMore.elapsedSeconds}s)</span>
+                  </p>
+                )}
+              </div>
+            )}
+            <button
+               onClick={() => {
+                 setRecipes([]);
+                 setHasGenerated(false);
+                 setDishSearch("");
                  sessionStorage.removeItem(RECIPE_STATE_KEY);
                }}
                className="text-sm font-bold text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 underline"

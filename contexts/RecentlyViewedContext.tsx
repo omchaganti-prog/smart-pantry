@@ -4,14 +4,10 @@ import { Recipe } from '../types';
 const RECENTLY_VIEWED_KEY = 'smartpantry_recently_viewed';
 const MAX_RECENTLY_VIEWED = 8;
 
-interface RecentlyViewedRecipe {
-  id: string;
-  title: string;
-  imageKeyword?: string;
-  prepTimeMinutes: number;
-  cookTimeMinutes: number;
-  viewedAt: number;
-}
+// The whole recipe is kept, not a summary of it. Storing only the title meant reopening
+// from this list re-generated the dish from scratch — a different method, different
+// ingredients and a different video every time.
+type RecentlyViewedRecipe = Recipe & { viewedAt: number };
 
 interface RecentlyViewedContextType {
   recentlyViewed: RecentlyViewedRecipe[];
@@ -47,14 +43,7 @@ export const RecentlyViewedProvider: React.FC<{ children: ReactNode }> = ({ chil
     setRecentlyViewed(prev => {
       const filtered = prev.filter(r => r.id !== recipe.id);
       
-      const newEntry: RecentlyViewedRecipe = {
-        id: recipe.id,
-        title: recipe.title,
-        imageKeyword: recipe.imageKeyword,
-        prepTimeMinutes: recipe.prepTimeMinutes,
-        cookTimeMinutes: recipe.cookTimeMinutes,
-        viewedAt: Date.now()
-      };
+      const newEntry: RecentlyViewedRecipe = { ...recipe, viewedAt: Date.now() };
       
       const updated = [newEntry, ...filtered].slice(0, MAX_RECENTLY_VIEWED);
       return updated;
