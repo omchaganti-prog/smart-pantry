@@ -438,6 +438,19 @@ const Recipes: React.FC = () => {
     return filterByPreferences(spiceFiltered);
   }, [recipes, skillLevel, spiceTolerance, preferences, allergies, isSearchingDish, dishSearch]);
   
+  // Skill and spice filter results too, and they live in Settings rather than on this
+  // screen — so an empty list could look like a bug. Name everything that's filtering.
+  const activeFilterSummary = useMemo(() => {
+    const active: string[] = [];
+    if (preferences.diet && preferences.diet !== 'None') active.push(`Diet: ${preferences.diet}`);
+    if (preferences.cuisine && preferences.cuisine !== 'Any') active.push(`Cuisine: ${preferences.cuisine}`);
+    if (preferences.mode && preferences.mode !== 'Standard') active.push(`Mode: ${preferences.mode}`);
+    if (skillLevel) active.push(`Skill: ${getSkillLabel()}`);
+    if (currentSpiceLabel) active.push(`Spice: ${currentSpiceLabel}`);
+    if (allergies.length > 0) active.push(`Allergies: ${allergies.join(', ')}`);
+    return active;
+  }, [preferences, skillLevel, getSkillLabel, currentSpiceLabel, allergies]);
+
   const excludedByAllergy = useMemo(() => {
     return getExcludedRecipesInfo(recipes);
   }, [recipes, allergies]);
@@ -1095,10 +1108,37 @@ const Recipes: React.FC = () => {
           <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center">
             <Filter size={32} className="text-gray-400" />
           </div>
-          <h3 className="text-lg font-bold text-gray-700 dark:text-gray-300 mb-2">No recipes match your selected filters</h3>
+          {/* This is a filter result, not a failure — but it read like an error, because
+              changing a preference only hides the recipes already on screen. Say which
+              settings are doing the hiding, and offer the fix right here. */}
+          <h3 className="text-lg font-bold text-gray-700 dark:text-gray-300 mb-2">
+            Nothing here matches your settings
+          </h3>
           <p className="text-sm text-gray-500 dark:text-gray-400 max-w-xs mx-auto">
-            Try adjusting your Diet, Cuisine, or Mode preferences to see more options.
+            This isn't an error — the {recipes.length} recipe{recipes.length === 1 ? '' : 's'} already
+            loaded {recipes.length === 1 ? "doesn't" : "don't"} fit. Preferences filter what's on
+            screen; generate again to get recipes built for these settings.
           </p>
+
+          {activeFilterSummary.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 justify-center mt-4 max-w-xs mx-auto">
+              {activeFilterSummary.map(f => (
+                <span key={f} className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+                  {f}
+                </span>
+              ))}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={loading}
+            className="mt-6 px-6 py-3 rounded-xl bg-gradient-to-r from-green-600 to-emerald-500 text-white font-bold text-sm shadow-lg shadow-green-500/30 inline-flex items-center gap-2 disabled:opacity-50 tap-scale"
+          >
+            <Sparkles size={16} />
+            {loading ? 'Cooking up new ideas…' : 'Generate recipes for these settings'}
+          </button>
         </div>
       )}
 
