@@ -289,6 +289,11 @@ router.post("/suggest-recipes", async (req, res) => {
       - Every recipe must get its own realistic figures; a rich cake and a green salad
         must not come back with the same numbers.
 
+      TAGS — the client filters on these, so they must be accurate:
+      - Include the diet you followed as a tag when one was requested (e.g. "Vegan").
+      - Include the cuisine as a tag when one was requested (e.g. "Italian").
+      - Then a few descriptive tags of your own.
+
       Also provide:
       - yieldNote: Brief cooking yield note (e.g., "Makes about 8-10 pancakes")
       - servingScaleMultipliers: array with scaling info for 1x, 2x, 3x batches

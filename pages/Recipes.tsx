@@ -365,6 +365,13 @@ const Recipes: React.FC = () => {
   const [recipeServings, setRecipeServings] = useState<Record<string, number>>(saved?.recipeServings || {});
 
   // Filters - load from localStorage for persistence across sessions
+  // The server generates for the chosen diet/cuisine but doesn't label recipes with
+  // them. Remembering what they were generated for lets us trust those results instead
+  // of re-rejecting them for not containing the word "Vegan".
+  const [generatedPrefs, setGeneratedPrefs] = useState<RecipePreferences | null>(
+    saved?.generatedPrefs || null
+  );
+
   const [preferences, setPreferencesState] = useState<RecipePreferences>(
     persistedPrefs || saved?.preferences || {
       diet: 'None',
@@ -387,8 +394,14 @@ const Recipes: React.FC = () => {
       const desc = recipe.description?.toLowerCase() || '';
       const combined = [...tags, title, desc].join(' ');
       
+      // Only re-check diet/cuisine when the recipes on screen were generated under a
+      // DIFFERENT setting. Applying it to freshly generated results meant a genuinely
+      // vegan recipe was discarded for not having the word "vegan" written on it.
+      const dietIsStale = generatedPrefs?.diet !== preferences.diet;
+      const cuisineIsStale = generatedPrefs?.cuisine !== preferences.cuisine;
+
       // DIET FILTER - strict matching
-      if (preferences.diet !== 'None') {
+      if (dietIsStale && preferences.diet !== 'None') {
         const dietLower = preferences.diet.toLowerCase();
         const hasDietTag = tags.some(tag => 
           tag.includes(dietLower) || 
@@ -399,7 +412,7 @@ const Recipes: React.FC = () => {
       }
       
       // CUISINE FILTER - strict matching
-      if (preferences.cuisine !== 'Any') {
+      if (cuisineIsStale && preferences.cuisine !== 'Any') {
         const cuisineLower = preferences.cuisine.toLowerCase();
         const hasCuisineTag = tags.some(tag => tag.includes(cuisineLower));
         if (!hasCuisineTag && !combined.includes(cuisineLower)) return false;
@@ -436,7 +449,7 @@ const Recipes: React.FC = () => {
     const skillFiltered = filterBySkill(allergyFiltered);
     const spiceFiltered = filterRecipesBySpice(skillFiltered);
     return filterByPreferences(spiceFiltered);
-  }, [recipes, skillLevel, spiceTolerance, preferences, allergies, isSearchingDish, dishSearch]);
+  }, [recipes, skillLevel, spiceTolerance, preferences, generatedPrefs, allergies, isSearchingDish, dishSearch]);
   
   // Skill and spice filter results too, and they live in Settings rather than on this
   // screen — so an empty list could look like a bug. Name everything that's filtering.
@@ -610,6 +623,7 @@ const Recipes: React.FC = () => {
       servings,
       isSearchingDish,
       preferences,
+      generatedPrefs,
       showFilters,
       expandedRecipe,
       addedToCart: Array.from(addedToCart),
@@ -638,6 +652,7 @@ const Recipes: React.FC = () => {
       const result = await suggestRecipes(items, preferences, userProfile || undefined);
       console.log("Recipes received:", result?.length);
       setRecipes(result);
+      setGeneratedPrefs(preferences);
     } catch (err) {
       console.error("Error generating recipes:", err);
       alert("Failed to generate recipes. Please try again.");
@@ -660,6 +675,7 @@ const Recipes: React.FC = () => {
         alert("Couldn't find any new recipes for this pantry — try changing your preferences or adding items.");
       } else {
         setRecipes(prev => [...prev, ...fresh]);
+        setGeneratedPrefs(preferences);
       }
     } catch (err) {
       console.error("Error generating more recipes:", err);
