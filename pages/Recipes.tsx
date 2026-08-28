@@ -971,6 +971,25 @@ const Recipes: React.FC = () => {
                    </select>
                  </div>
                </div>
+
+               {/* Changing preferences only re-filters the recipes already on screen, so
+                   without this there was no way to actually ask for new ones that match
+                   a new diet or cuisine — and "Surprise Me" is gone once results exist. */}
+               {hasGenerated && !isSearchingDish && (
+                 <button
+                   type="button"
+                   data-walkthrough="regenerate"
+                   onClick={() => {
+                     handleGenerate();
+                     if (isWalkthroughActive) notifyInteraction("[data-walkthrough='regenerate']");
+                   }}
+                   disabled={loading}
+                   className="mt-4 w-full py-3 rounded-xl bg-gradient-to-r from-green-600 to-emerald-500 text-white font-bold text-sm shadow-lg shadow-green-500/30 flex items-center justify-center gap-2 disabled:opacity-50 tap-scale"
+                 >
+                   <Sparkles size={16} />
+                   {loading ? 'Cooking up new ideas…' : 'Generate new recipes'}
+                 </button>
+               )}
             </div>
           )}
       </header>

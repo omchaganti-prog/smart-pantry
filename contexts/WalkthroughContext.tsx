@@ -98,6 +98,17 @@ export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
   },
   {
     id: 7,
+    title: "Now run it again",
+    description: "Preferences only filter what's already on screen — tap this to fetch fresh recipes that match what you just chose.",
+    targetSelector: "[data-walkthrough='regenerate']",
+    waitForAction: 'tap',
+    emoji: "🔄",
+    arrowPosition: 'bottom',
+    route: '/recipes',
+    pausesOnAction: true
+  },
+  {
+    id: 8,
     title: "Missing ingredients",
     description: "Anything a recipe needs but you don't have lands here, ready for the shop.",
     targetSelector: "[data-walkthrough='shopping-list']",
@@ -106,7 +117,7 @@ export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
     route: '/shopping'
   },
   {
-    id: 8,
+    id: 9,
     title: "Tell it about you",
     description: "Open AI Chef here to set allergies, cooking skill and spice tolerance — every recipe gets filtered to match.",
     targetSelector: "[data-walkthrough='settings-tabs']",
@@ -115,7 +126,7 @@ export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
     route: '/settings'
   },
   {
-    id: 9,
+    id: 10,
     title: "You're all set!",
     description: "Scan, cook, shop. Enjoy your kitchen.",
     targetSelector: "",
