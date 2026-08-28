@@ -231,7 +231,12 @@ const NavBar: React.FC = () => {
           </div>
 
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10">
-             <NavLink to="/scan" className="group">
+             <NavLink
+               to="/scan"
+               className="group"
+               data-walkthrough="nav-scan"
+               onClick={() => notifyInteraction("[data-walkthrough='nav-scan']")}
+             >
                <div 
                  className={`flex items-center justify-center w-16 h-16 bg-gradient-to-tr ${accentColors.gradient} rounded-full shadow-lg dark:shadow-black/50 text-white transition-all duration-300 group-active:scale-95 group-hover:-translate-y-1 border-4 border-[#FAFAF9] dark:border-gray-900`}
                  style={{ boxShadow: `0 10px 25px -5px ${accentColors.primary}40` }}

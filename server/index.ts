@@ -31,11 +31,21 @@ app.use((req, res, next) => {
   const server = await registerRoutes(app);
 
   const distPath = path.join(__dirname, "..", "dist");
-  app.use(express.static(distPath));
-  
+
+  // Asset filenames are content-hashed, so they're safe to cache hard. index.html is
+  // not — it's what points at the current bundle, so a cached copy keeps serving the
+  // previous deploy's JS and users see stale code until they hard-refresh.
+  const noCacheHtml = { etag: false, lastModified: false, cacheControl: false, headers: { "Cache-Control": "no-cache" } };
+
+  app.use(express.static(distPath, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith("index.html")) res.setHeader("Cache-Control", "no-cache");
+    },
+  }));
+
   app.use((req, res, next) => {
     if (!req.path.startsWith('/api')) {
-      res.sendFile(path.join(distPath, "index.html"));
+      res.sendFile(path.join(distPath, "index.html"), noCacheHtml);
     } else {
       next();
     }

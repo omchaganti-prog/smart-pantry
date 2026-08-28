@@ -16,9 +16,9 @@ export interface WalkthroughStep {
 }
 
 export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
-  // Ordered to follow how the app is actually used: fill the pantry first, then cook
-  // from it, then shop for what's missing. The previous order asked you to generate
-  // recipes before you had any ingredients, and only showed the pantry afterwards.
+  // Follows how the app is actually used: scan food in, see it in the pantry, cook from
+  // it, then shop for what's missing. The original order asked you to generate recipes
+  // before you had any ingredients, and introduced the pantry two steps later.
   {
     id: 0,
     title: "Welcome to SmartPantry!",
@@ -29,8 +29,17 @@ export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
   },
   {
     id: 1,
-    title: "Start with your pantry",
-    description: "Everything begins here — this is the food you already have at home.",
+    title: "Scan your food in",
+    description: "Point your camera at an item and it reads the name, the category and the expiry date off the label.",
+    targetSelector: "[data-walkthrough='nav-scan']",
+    waitForAction: 'tap',
+    emoji: "📷",
+    arrowPosition: 'top'
+  },
+  {
+    id: 2,
+    title: "It lands in your pantry",
+    description: "Everything you scan shows up here, sorted so whatever expires first is at the top.",
     targetSelector: "[data-walkthrough='nav-pantry']",
     waitForAction: 'tap',
     emoji: "🥬",
@@ -38,9 +47,9 @@ export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
     route: '/pantry'
   },
   {
-    id: 2,
-    title: "Add what you have",
-    description: "Tap + to add an item by hand, or use the scanner to read a label and its expiry date for you.",
+    id: 3,
+    title: "Or add it by hand",
+    description: "No label to scan? Tap + and type it in.",
     targetSelector: "[data-walkthrough='pantry-add']",
     waitForAction: 'tap',
     emoji: "➕",
@@ -48,7 +57,7 @@ export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
     route: '/pantry'
   },
   {
-    id: 3,
+    id: 4,
     title: "Now cook from it",
     description: "The Chef tab turns whatever is in your pantry into real recipes.",
     targetSelector: "[data-walkthrough='nav-chef']",
@@ -58,7 +67,7 @@ export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
     route: '/recipes'
   },
   {
-    id: 4,
+    id: 5,
     title: "Generate recipes",
     description: "Tap 'Surprise Me' for ideas built around what you own — especially anything about to expire.",
     targetSelector: "[data-walkthrough='surprise-me']",
@@ -68,7 +77,7 @@ export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
     route: '/recipes'
   },
   {
-    id: 5,
+    id: 6,
     title: "Tune the results",
     description: "Preferences set your diet, cuisine and cooking mode — Quick, Healthy, Budget and more.",
     targetSelector: "[data-walkthrough='preferences-btn']",
@@ -78,7 +87,7 @@ export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
     route: '/recipes'
   },
   {
-    id: 6,
+    id: 7,
     title: "Missing ingredients",
     description: "Anything a recipe needs but you don't have lands here, ready for the shop.",
     targetSelector: "[data-walkthrough='nav-cart']",
@@ -88,7 +97,7 @@ export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
     route: '/shopping'
   },
   {
-    id: 7,
+    id: 8,
     title: "Tell it about you",
     description: "Set allergies, cooking skill and spice tolerance — every recipe gets filtered to match.",
     targetSelector: "[data-walkthrough='allergy-settings']",
@@ -97,7 +106,7 @@ export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
     route: '/settings'
   },
   {
-    id: 8,
+    id: 9,
     title: "You're all set!",
     description: "Scan, cook, shop. Enjoy your kitchen.",
     targetSelector: "",
