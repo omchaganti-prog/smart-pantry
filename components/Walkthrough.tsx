@@ -32,13 +32,15 @@ const Walkthrough: React.FC = () => {
   const { startWalkthrough } = useWalkthrough();
 
   useEffect(() => {
-    if (!hasAutoStarted.current && !hasCompletedWalkthrough) {
+    if (hasAutoStarted.current || hasCompletedWalkthrough) return;
+    // The flag is set when the timer FIRES, not when it's scheduled. Setting it up front
+    // meant StrictMode's mount/unmount/mount cleared the pending timer on the first pass
+    // and then skipped rescheduling on the second, so the tour never started at all.
+    const timer = setTimeout(() => {
       hasAutoStarted.current = true;
-      const timer = setTimeout(() => {
-        startWalkthrough();
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
+      startWalkthrough();
+    }, 1000);
+    return () => clearTimeout(timer);
   }, [hasCompletedWalkthrough, startWalkthrough]);
 
   // Take the user to the screen this step is about. Steps used to point at elements on
@@ -79,14 +81,24 @@ const Walkthrough: React.FC = () => {
             zIndex: 210
           };
 
-          if (rect.top > viewportHeight / 2) {
-            newStyle.bottom = viewportHeight - rect.top + 20;
-            newStyle.left = '50%';
-            newStyle.transform = 'translateX(-50%)';
-          } else {
+          // Keep the tooltip on screen whatever the target's size or position. A tall
+          // target (a whole page section) used to push it far below the fold, where its
+          // Next button couldn't be reached at all.
+          const TOOLTIP_ALLOWANCE = 300;
+          newStyle.left = '50%';
+          newStyle.transform = 'translateX(-50%)';
+
+          const roomBelow = viewportHeight - rect.bottom;
+          const roomAbove = rect.top;
+
+          if (roomBelow >= TOOLTIP_ALLOWANCE) {
             newStyle.top = rect.bottom + 20;
-            newStyle.left = '50%';
-            newStyle.transform = 'translateX(-50%)';
+          } else if (roomAbove >= TOOLTIP_ALLOWANCE) {
+            newStyle.bottom = viewportHeight - rect.top + 20;
+          } else {
+            // neither side has room — centre it and let the spotlight speak for itself
+            newStyle.top = '50%';
+            newStyle.transform = 'translate(-50%, -50%)';
           }
 
           setTooltipStyle(newStyle);
@@ -135,7 +147,9 @@ const Walkthrough: React.FC = () => {
   // blockers — just a way back into the tour when they're done.
   if (isWalkthroughPaused) {
     return (
-      <div className="fixed bottom-40 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-2 pointer-events-auto">
+      // pinned to the top: modals and the nav bar both own the bottom of the screen,
+      // where this used to sit right on top of the Cancel / Add Item buttons
+      <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-2 pointer-events-auto">
         <button
           onClick={resumeWalkthrough}
           className="px-5 py-3 rounded-full bg-gray-900 dark:bg-green-600 text-white font-bold text-sm shadow-2xl border border-white/10 tap-scale hover:bg-black dark:hover:bg-green-700 transition-colors"

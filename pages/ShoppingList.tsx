@@ -71,8 +71,8 @@ const ShoppingList: React.FC = () => {
   };
 
   return (
-    <div data-walkthrough="shopping-list" className="p-4 pb-28 min-h-screen bg-[#FAFAF9] dark:bg-gray-900 transition-colors duration-300">
-      <header className="flex items-center gap-3 mb-6 animate-fade-in">
+    <div className="p-4 pb-28 min-h-screen bg-[#FAFAF9] dark:bg-gray-900 transition-colors duration-300">
+      <header data-walkthrough="shopping-list" className="flex items-center gap-3 mb-6 animate-fade-in">
         <div className="p-3 bg-gradient-to-br from-yellow-400 to-orange-400 rounded-2xl shadow-warm text-white">
           <ShoppingCart size={24} fill="currentColor" />
         </div>

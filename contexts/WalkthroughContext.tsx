@@ -98,17 +98,16 @@ export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
     id: 7,
     title: "Missing ingredients",
     description: "Anything a recipe needs but you don't have lands here, ready for the shop.",
-    targetSelector: "[data-walkthrough='nav-cart']",
+    targetSelector: "[data-walkthrough='shopping-list']",
     waitForAction: 'tap',
     emoji: "🛒",
-    arrowPosition: 'top',
     route: '/shopping'
   },
   {
     id: 8,
     title: "Tell it about you",
-    description: "Set allergies, cooking skill and spice tolerance — every recipe gets filtered to match.",
-    targetSelector: "[data-walkthrough='allergy-settings']",
+    description: "Open AI Chef here to set allergies, cooking skill and spice tolerance — every recipe gets filtered to match.",
+    targetSelector: "[data-walkthrough='settings-tabs']",
     waitForAction: 'tap',
     emoji: "⚙️",
     route: '/settings'

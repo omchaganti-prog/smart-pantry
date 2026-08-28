@@ -208,7 +208,7 @@ const Settings: React.FC = () => {
       </header>
 
       {/* Tabs */}
-      <div className="flex mb-6 bg-white dark:bg-gray-800 rounded-2xl shadow-card border border-gray-100 dark:border-gray-700 overflow-hidden animate-fade-in-up opacity-0" style={{ animationDelay: '0.05s' }}>
+      <div data-walkthrough="settings-tabs" className="flex mb-6 bg-white dark:bg-gray-800 rounded-2xl shadow-card border border-gray-100 dark:border-gray-700 overflow-hidden animate-fade-in-up opacity-0" style={{ animationDelay: '0.05s' }}>
         {renderTabButton('account', 'Account', <User size={18} />)}
         {renderTabButton('general', 'General', <Layers size={18} />)}
         {renderTabButton('ai_chef', 'AI Chef', <ChefHat size={18} />)}
