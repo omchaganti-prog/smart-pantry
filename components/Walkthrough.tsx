@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useWalkthrough, WALKTHROUGH_STEPS } from '../contexts/WalkthroughContext';
 import { X, ChefHat, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react';
 
@@ -16,10 +17,13 @@ const Walkthrough: React.FC = () => {
     currentStepData,
     totalSteps,
     advanceStep,
+    goBackStep,
     skipWalkthrough,
     hasCompletedWalkthrough
   } = useWalkthrough();
   
+  const navigate = useNavigate();
+  const location = useLocation();
   const [spotlight, setSpotlight] = useState<SpotlightPosition | null>(null);
   const [tooltipStyle, setTooltipStyle] = useState<React.CSSProperties>({});
   const hasAutoStarted = useRef(false);
@@ -35,11 +39,20 @@ const Walkthrough: React.FC = () => {
     }
   }, [hasCompletedWalkthrough, startWalkthrough]);
 
+  // Take the user to the screen this step is about. Steps used to point at elements on
+  // other pages, so the target simply wasn't in the DOM and the tour stalled.
+  useEffect(() => {
+    if (!isWalkthroughActive || !currentStepData?.route) return;
+    if (location.pathname !== currentStepData.route) {
+      navigate(currentStepData.route);
+    }
+  }, [isWalkthroughActive, currentStepData, location.pathname, navigate]);
+
   useEffect(() => {
     if (!isWalkthroughActive || !currentStepData) return;
 
     const step = currentStepData;
-    
+
     const findAndHighlight = () => {
       if (step.targetSelector) {
         const element = document.querySelector(step.targetSelector);
@@ -307,18 +320,30 @@ const Walkthrough: React.FC = () => {
               ))}
             </div>
 
-            {(isWelcome || isFinal) && (
+            {/* Every step can be advanced from here. Previously only the first and last
+                had a button, so any step whose target was missing — or whose target
+                nothing wired up to notifyInteraction — left the tour stuck behind a
+                full-screen blocker with only "Skip tour" as a way out. */}
+            <div className="flex items-center gap-2">
+              {!isWelcome && (
+                <button
+                  onClick={goBackStep}
+                  className="px-4 py-3 rounded-xl bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 font-bold text-sm tap-scale hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                >
+                  Back
+                </button>
+              )}
               <button
                 onClick={isFinal ? skipWalkthrough : advanceStep}
-                className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-green-600 to-emerald-500 text-white font-bold text-sm shadow-lg shadow-green-500/30 transition-all duration-200 ease-out hover:shadow-xl tap-scale"
+                className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-green-600 to-emerald-500 text-white font-bold text-sm shadow-lg shadow-green-500/30 transition-all duration-200 ease-out hover:shadow-xl tap-scale"
               >
-                {isFinal ? "Start Cooking!" : "Let's Go!"}
+                {isFinal ? "Start Cooking!" : isWelcome ? "Let's Go!" : "Next"}
               </button>
-            )}
+            </div>
 
-            {!isWelcome && !isFinal && (
-              <p className="text-xs text-gray-400 dark:text-gray-500">
-                Tap the highlighted area to continue
+            {!isWelcome && !isFinal && spotlight && (
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-3">
+                Tap the highlighted area, or use Next
               </p>
             )}
 

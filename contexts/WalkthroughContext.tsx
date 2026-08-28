@@ -11,84 +11,95 @@ export interface WalkthroughStep {
   waitForAction: 'tap' | 'scroll' | 'open' | 'any';
   emoji?: string;
   arrowPosition?: 'top' | 'bottom' | 'left' | 'right';
+  /** Screen this step belongs to. The tour navigates here so the target exists. */
+  route?: string;
 }
 
 export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
+  // Ordered to follow how the app is actually used: fill the pantry first, then cook
+  // from it, then shop for what's missing. The previous order asked you to generate
+  // recipes before you had any ingredients, and only showed the pantry afterwards.
   {
     id: 0,
     title: "Welcome to SmartPantry!",
-    description: "Let's take a quick tour. Tap highlighted areas to continue.",
+    description: "A quick tour of how it all fits together. Takes about a minute.",
     targetSelector: "",
     waitForAction: 'any',
     emoji: "👋"
   },
   {
     id: 1,
-    title: "Head to Chef",
-    description: "This is where the magic happens! Tap the Chef tab below.",
-    targetSelector: "[data-walkthrough='nav-chef']",
-    waitForAction: 'tap',
-    emoji: "👨‍🍳",
-    arrowPosition: 'top'
-  },
-  {
-    id: 2,
-    title: "Generate Recipes",
-    description: "Tap 'Surprise Me' to get AI recipe suggestions based on your pantry.",
-    targetSelector: "[data-walkthrough='surprise-me']",
-    waitForAction: 'tap',
-    emoji: "🍽️",
-    arrowPosition: 'bottom'
-  },
-  {
-    id: 3,
-    title: "Filter Your Recipes",
-    description: "Use Preferences to control what recipes you see. Try opening it.",
-    targetSelector: "[data-walkthrough='preferences-btn']",
-    waitForAction: 'tap',
-    emoji: "🎯",
-    arrowPosition: 'bottom'
-  },
-  {
-    id: 4,
-    title: "Cooking Mode",
-    description: "Pick your cooking style - Quick, Healthy, Budget & more.",
-    targetSelector: "[data-walkthrough='mode-selector']",
-    waitForAction: 'tap',
-    emoji: "🎚️",
-    arrowPosition: 'top'
-  },
-  {
-    id: 5,
-    title: "Your Pantry",
-    description: "Track ingredients you have at home. Tap Pantry to continue.",
+    title: "Start with your pantry",
+    description: "Everything begins here — this is the food you already have at home.",
     targetSelector: "[data-walkthrough='nav-pantry']",
     waitForAction: 'tap',
     emoji: "🥬",
-    arrowPosition: 'top'
+    arrowPosition: 'top',
+    route: '/pantry'
+  },
+  {
+    id: 2,
+    title: "Add what you have",
+    description: "Tap + to add an item by hand, or use the scanner to read a label and its expiry date for you.",
+    targetSelector: "[data-walkthrough='pantry-add']",
+    waitForAction: 'tap',
+    emoji: "➕",
+    arrowPosition: 'bottom',
+    route: '/pantry'
+  },
+  {
+    id: 3,
+    title: "Now cook from it",
+    description: "The Chef tab turns whatever is in your pantry into real recipes.",
+    targetSelector: "[data-walkthrough='nav-chef']",
+    waitForAction: 'tap',
+    emoji: "👨‍🍳",
+    arrowPosition: 'top',
+    route: '/recipes'
+  },
+  {
+    id: 4,
+    title: "Generate recipes",
+    description: "Tap 'Surprise Me' for ideas built around what you own — especially anything about to expire.",
+    targetSelector: "[data-walkthrough='surprise-me']",
+    waitForAction: 'tap',
+    emoji: "🍽️",
+    arrowPosition: 'bottom',
+    route: '/recipes'
+  },
+  {
+    id: 5,
+    title: "Tune the results",
+    description: "Preferences set your diet, cuisine and cooking mode — Quick, Healthy, Budget and more.",
+    targetSelector: "[data-walkthrough='preferences-btn']",
+    waitForAction: 'tap',
+    emoji: "🎯",
+    arrowPosition: 'bottom',
+    route: '/recipes'
   },
   {
     id: 6,
-    title: "Shopping Cart",
-    description: "Missing ingredients go here automatically. Tap to check it out.",
+    title: "Missing ingredients",
+    description: "Anything a recipe needs but you don't have lands here, ready for the shop.",
     targetSelector: "[data-walkthrough='nav-cart']",
     waitForAction: 'tap',
     emoji: "🛒",
-    arrowPosition: 'top'
+    arrowPosition: 'top',
+    route: '/shopping'
   },
   {
     id: 7,
-    title: "Settings & Allergies",
-    description: "Set your allergies and preferences here. Tap More to continue.",
-    targetSelector: "[data-walkthrough='nav-more']",
+    title: "Tell it about you",
+    description: "Set allergies, cooking skill and spice tolerance — every recipe gets filtered to match.",
+    targetSelector: "[data-walkthrough='allergy-settings']",
     waitForAction: 'tap',
     emoji: "⚙️",
-    arrowPosition: 'top'
+    route: '/settings'
   },
   {
     id: 8,
-    title: "You're All Set!",
-    description: "Happy cooking! Explore and enjoy your personalized recipes.",
+    title: "You're all set!",
+    description: "Scan, cook, shop. Enjoy your kitchen.",
     targetSelector: "",
     waitForAction: 'any',
     emoji: "🍳"
@@ -103,6 +114,7 @@ interface WalkthroughContextType {
   totalSteps: number;
   startWalkthrough: () => void;
   advanceStep: () => void;
+  goBackStep: () => void;
   skipWalkthrough: () => void;
   completeWalkthrough: () => void;
   notifyInteraction: (selector: string) => void;
@@ -148,6 +160,10 @@ export const WalkthroughProvider: React.FC<{ children: ReactNode }> = ({ childre
     }
   }, [currentStep, totalSteps]);
 
+  const goBackStep = useCallback(() => {
+    setCurrentStep(prev => Math.max(0, prev - 1));
+  }, []);
+
   const completeWalkthrough = useCallback(() => {
     setIsWalkthroughActive(false);
     setHasCompletedWalkthrough(true);
@@ -184,6 +200,7 @@ export const WalkthroughProvider: React.FC<{ children: ReactNode }> = ({ childre
       totalSteps,
       startWalkthrough,
       advanceStep,
+      goBackStep,
       skipWalkthrough,
       completeWalkthrough,
       notifyInteraction

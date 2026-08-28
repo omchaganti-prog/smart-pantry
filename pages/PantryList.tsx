@@ -2,8 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { getItems, deleteItem, saveItem } from '../services/storageService';
 import { PantryItem, FoodCategory } from '../types';
 import { Search, Trash2, Filter, LayoutGrid, List as ListIcon, Leaf, Plus, X } from 'lucide-react';
+import { useWalkthrough } from '../contexts/WalkthroughContext';
 
 const PantryList: React.FC = () => {
+  const { notifyInteraction } = useWalkthrough();
   const [items, setItems] = useState<PantryItem[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState<string>('All');
@@ -218,9 +220,13 @@ const PantryList: React.FC = () => {
       )}
 
       {/* Floating Add Button */}
-      <button 
+      <button
         data-walkthrough="pantry-add"
-        onClick={() => setShowAddModal(true)}
+        onClick={() => {
+          // the tour highlights this button; without this it could never be satisfied
+          notifyInteraction("[data-walkthrough='pantry-add']");
+          setShowAddModal(true);
+        }}
         className="fixed bottom-28 right-6 w-14 h-14 bg-gradient-to-br from-green-600 to-green-500 text-white rounded-full shadow-food hover:shadow-lg transition-all hover:scale-110 tap-scale flex items-center justify-center z-50"
       >
         <Plus size={28} />
