@@ -13,6 +13,12 @@ export interface WalkthroughStep {
   arrowPosition?: 'top' | 'bottom' | 'left' | 'right';
   /** Screen this step belongs to. The tour navigates here so the target exists. */
   route?: string;
+  /**
+   * Steps that ask the user to actually DO something (scan an item, add one by hand).
+   * Tapping the highlight pauses the tour and lifts the overlay so they can finish,
+   * instead of advancing and navigating the screen out from under them.
+   */
+  pausesOnAction?: boolean;
 }
 
 export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
@@ -30,11 +36,12 @@ export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
   {
     id: 1,
     title: "Scan your food in",
-    description: "Point your camera at an item and it reads the name, the category and the expiry date off the label.",
+    description: "Point your camera at an item and it reads the name, category and expiry date off the label. Tap it to try — the tour waits for you.",
     targetSelector: "[data-walkthrough='nav-scan']",
     waitForAction: 'tap',
     emoji: "📷",
-    arrowPosition: 'top'
+    arrowPosition: 'top',
+    pausesOnAction: true
   },
   {
     id: 2,
@@ -49,12 +56,13 @@ export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
   {
     id: 3,
     title: "Or add it by hand",
-    description: "No label to scan? Tap + and type it in.",
+    description: "No label to scan? Tap + and add one now — the tour waits, and you can pick it back up when you're done.",
     targetSelector: "[data-walkthrough='pantry-add']",
     waitForAction: 'tap',
     emoji: "➕",
     arrowPosition: 'bottom',
-    route: '/pantry'
+    route: '/pantry',
+    pausesOnAction: true
   },
   {
     id: 4,
@@ -124,6 +132,9 @@ interface WalkthroughContextType {
   startWalkthrough: () => void;
   advanceStep: () => void;
   goBackStep: () => void;
+  isWalkthroughPaused: boolean;
+  pauseWalkthrough: () => void;
+  resumeWalkthrough: () => void;
   skipWalkthrough: () => void;
   completeWalkthrough: () => void;
   notifyInteraction: (selector: string) => void;
@@ -136,6 +147,7 @@ export const WalkthroughProvider: React.FC<{ children: ReactNode }> = ({ childre
     return localStorage.getItem(WALKTHROUGH_KEY) === 'true';
   });
   const [isWalkthroughActive, setIsWalkthroughActive] = useState(false);
+  const [isWalkthroughPaused, setIsWalkthroughPaused] = useState(false);
   const [currentStep, setCurrentStep] = useState<number>(() => {
     const saved = localStorage.getItem(WALKTHROUGH_PROGRESS_KEY);
     return saved ? parseInt(saved, 10) : 0;
@@ -155,6 +167,7 @@ export const WalkthroughProvider: React.FC<{ children: ReactNode }> = ({ childre
     localStorage.removeItem(WALKTHROUGH_PROGRESS_KEY);
     setHasCompletedWalkthrough(false);
     setCurrentStep(0);
+    setIsWalkthroughPaused(false);
     setIsWalkthroughActive(true);
   }, []);
 
@@ -168,6 +181,16 @@ export const WalkthroughProvider: React.FC<{ children: ReactNode }> = ({ childre
       localStorage.removeItem(WALKTHROUGH_PROGRESS_KEY);
     }
   }, [currentStep, totalSteps]);
+
+  const pauseWalkthrough = useCallback(() => {
+    setIsWalkthroughPaused(true);
+  }, []);
+
+  // Resuming moves on: the user has just done the thing the step was asking for.
+  const resumeWalkthrough = useCallback(() => {
+    setIsWalkthroughPaused(false);
+    advanceStep();
+  }, [advanceStep]);
 
   const goBackStep = useCallback(() => {
     setCurrentStep(prev => Math.max(0, prev - 1));
@@ -196,6 +219,12 @@ export const WalkthroughProvider: React.FC<{ children: ReactNode }> = ({ childre
     }
     
     if (currentStepData.targetSelector && selector === currentStepData.targetSelector) {
+      // Action steps hand control back to the user rather than advancing, which would
+      // navigate away mid-task (tapping + used to close the Add dialog instantly).
+      if (currentStepData.pausesOnAction) {
+        setIsWalkthroughPaused(true);
+        return;
+      }
       setTimeout(() => advanceStep(), 300);
     }
   }, [isWalkthroughActive, currentStepData, advanceStep]);
@@ -210,6 +239,9 @@ export const WalkthroughProvider: React.FC<{ children: ReactNode }> = ({ childre
       startWalkthrough,
       advanceStep,
       goBackStep,
+      isWalkthroughPaused,
+      pauseWalkthrough,
+      resumeWalkthrough,
       skipWalkthrough,
       completeWalkthrough,
       notifyInteraction

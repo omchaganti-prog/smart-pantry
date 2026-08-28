@@ -19,6 +19,8 @@ const Walkthrough: React.FC = () => {
     advanceStep,
     goBackStep,
     skipWalkthrough,
+    isWalkthroughPaused,
+    resumeWalkthrough,
     hasCompletedWalkthrough
   } = useWalkthrough();
   
@@ -42,14 +44,14 @@ const Walkthrough: React.FC = () => {
   // Take the user to the screen this step is about. Steps used to point at elements on
   // other pages, so the target simply wasn't in the DOM and the tour stalled.
   useEffect(() => {
-    if (!isWalkthroughActive || !currentStepData?.route) return;
+    if (!isWalkthroughActive || isWalkthroughPaused || !currentStepData?.route) return;
     if (location.pathname !== currentStepData.route) {
       navigate(currentStepData.route);
     }
-  }, [isWalkthroughActive, currentStepData, location.pathname, navigate]);
+  }, [isWalkthroughActive, isWalkthroughPaused, currentStepData, location.pathname, navigate]);
 
   useEffect(() => {
-    if (!isWalkthroughActive || !currentStepData) return;
+    if (!isWalkthroughActive || isWalkthroughPaused || !currentStepData) return;
 
     const step = currentStepData;
 
@@ -125,9 +127,30 @@ const Walkthrough: React.FC = () => {
       clearTimeout(timer);
       window.removeEventListener('resize', handleResize);
     };
-  }, [isWalkthroughActive, currentStep, currentStepData]);
+  }, [isWalkthroughActive, isWalkthroughPaused, currentStep, currentStepData]);
 
   if (!isWalkthroughActive || !currentStepData) return null;
+
+  // Paused: the user is mid-task (adding an item, scanning). No overlay and no click
+  // blockers — just a way back into the tour when they're done.
+  if (isWalkthroughPaused) {
+    return (
+      <div className="fixed bottom-40 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-2 pointer-events-auto">
+        <button
+          onClick={resumeWalkthrough}
+          className="px-5 py-3 rounded-full bg-gray-900 dark:bg-green-600 text-white font-bold text-sm shadow-2xl border border-white/10 tap-scale hover:bg-black dark:hover:bg-green-700 transition-colors"
+        >
+          Resume tour
+        </button>
+        <button
+          onClick={skipWalkthrough}
+          className="px-4 py-3 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur text-gray-500 dark:text-gray-400 font-bold text-xs shadow-lg tap-scale"
+        >
+          Skip
+        </button>
+      </div>
+    );
+  }
 
   const step = currentStepData;
   const isWelcome = step.id === 0;
