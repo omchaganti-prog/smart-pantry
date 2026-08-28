@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "start": "cross-env NODE_ENV=production tsx server/index.ts"
+    "start": "tsx server/index.ts"
   },
   "dependencies": {
     "@google/genai": "^1.31.0",
@@ -47,9 +47,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
-    "@vitejs/plugin-react": "^5.0.0",
     "cross-env": "^7.0.3",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "typescript": "~5.8.2"
   }
 }

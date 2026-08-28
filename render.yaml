@@ -9,7 +9,9 @@ services:
     name: smart-pantry
     runtime: node
     plan: free
-    buildCommand: npm install && npm run build
+    # --include=dev so the build tools install even with NODE_ENV=production, which
+    # otherwise makes npm skip devDependencies and leaves `vite build` with no vite
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /api/auth/config
     disk:
