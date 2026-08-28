@@ -57,15 +57,18 @@ const Walkthrough: React.FC = () => {
 
     const step = currentStepData;
 
-    const findAndHighlight = () => {
+    const findAndHighlight = (autoScroll = false) => {
       if (step.targetSelector) {
         const element = document.querySelector(step.targetSelector);
         if (element) {
           const rect = element.getBoundingClientRect();
           const padding = 12;
           
+          // Pure viewport coordinates. The overlay and the blockers are all
+          // position:fixed, so adding window.scrollY offset the hole by the scroll
+          // distance and it slid away from the element as the page moved.
           setSpotlight({
-            top: rect.top - padding + window.scrollY,
+            top: rect.top - padding,
             left: rect.left - padding,
             width: rect.width + padding * 2,
             height: rect.height + padding * 2
@@ -103,7 +106,9 @@ const Walkthrough: React.FC = () => {
 
           setTooltipStyle(newStyle);
 
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          // only on the way in — doing this on every reposition would fight the user's
+          // own scrolling and keep yanking the page back
+          if (autoScroll) element.scrollIntoView({ behavior: 'smooth', block: 'center' });
         } else {
           setSpotlight(null);
           setTooltipStyle({
@@ -130,14 +135,28 @@ const Walkthrough: React.FC = () => {
       }
     };
 
-    const timer = setTimeout(findAndHighlight, 200);
-    
-    const handleResize = () => findAndHighlight();
-    window.addEventListener('resize', handleResize);
-    
+    const timer = setTimeout(() => findAndHighlight(true), 200);
+
+    // Recompute while the page moves, otherwise the highlight stays where the element
+    // *was* and drifts off it as you scroll. Capture phase so scrolling inner
+    // containers counts too, and rAF-throttled to stay smooth.
+    let frame = 0;
+    const reposition = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        findAndHighlight(false);
+      });
+    };
+
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+
     return () => {
       clearTimeout(timer);
-      window.removeEventListener('resize', handleResize);
+      if (frame) cancelAnimationFrame(frame);
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
     };
   }, [isWalkthroughActive, isWalkthroughPaused, currentStep, currentStepData]);
 

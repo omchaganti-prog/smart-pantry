@@ -77,22 +77,24 @@ export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
   {
     id: 5,
     title: "Generate recipes",
-    description: "Tap 'Surprise Me' for ideas built around what you own — especially anything about to expire.",
+    description: "Tap 'Surprise Me' for ideas built around what you own — especially anything about to expire. Give it a go, the tour waits.",
     targetSelector: "[data-walkthrough='surprise-me']",
     waitForAction: 'tap',
     emoji: "🍽️",
     arrowPosition: 'bottom',
-    route: '/recipes'
+    route: '/recipes',
+    pausesOnAction: true
   },
   {
     id: 6,
     title: "Tune the results",
-    description: "Preferences set your diet, cuisine and cooking mode — Quick, Healthy, Budget and more.",
+    description: "Open Preferences to set your diet, cuisine and cooking mode — Quick, Healthy, Budget and more. Pick what you like, the tour waits.",
     targetSelector: "[data-walkthrough='preferences-btn']",
     waitForAction: 'tap',
     emoji: "🎯",
     arrowPosition: 'bottom',
-    route: '/recipes'
+    route: '/recipes',
+    pausesOnAction: true
   },
   {
     id: 7,
