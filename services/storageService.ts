@@ -24,6 +24,56 @@ export const saveItem = (item: PantryItem): void => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedItems));
 };
 
+/**
+ * Saves a whole scanned batch in one write.
+ *
+ * Photographing a fridge from several angles turns up the same milk twice, and the
+ * pantry usually already contains some of what was scanned — so by default an item
+ * whose name already exists has its quantity added to the existing row rather than
+ * creating a second "Milk". Mirrors how `addToShoppingList` merges by name.
+ *
+ * Returns what happened, so the UI can say "4 added, 2 merged" instead of guessing.
+ */
+export const saveItems = (
+  newItems: PantryItem[],
+  options: { merge?: boolean } = { merge: true }
+): { added: number; merged: number; failed: boolean } => {
+  const items = getItems();
+  let added = 0;
+  let merged = 0;
+
+  for (const incoming of newItems) {
+    const key = incoming.name.trim().toLowerCase();
+    const existing = options.merge ? items.find(i => i.name.trim().toLowerCase() === key) : undefined;
+
+    if (existing) {
+      existing.quantity += incoming.quantity;
+      // keep the sooner expiry — it's the one that needs attention first
+      if (incoming.expiryDate && (!existing.expiryDate || incoming.expiryDate < existing.expiryDate)) {
+        existing.expiryDate = incoming.expiryDate;
+      }
+      merged++;
+    } else {
+      items.unshift(incoming);
+      added++;
+    }
+  }
+
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  } catch {
+    // Almost always the ~5MB quota, and thumbnails are what fill it. Drop them and
+    // retry rather than losing the whole scan.
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(items.map(({ thumbnail, ...rest }) => rest)));
+    } catch {
+      return { added: 0, merged: 0, failed: true };
+    }
+  }
+
+  return { added, merged, failed: false };
+};
+
 export const updateItem = (updatedItem: PantryItem): void => {
   const items = getItems();
   const index = items.findIndex(i => i.id === updatedItem.id);

@@ -1,32 +1,51 @@
 import { PantryItem, FoodCategory, ScanResult, Recipe, RecipePreferences, WeeklyPlan, UserProfile } from "../types";
 
 /**
- * Analyzes an image to detect food items and read expiration dates (OCR).
+ * Every failure used to read "Failed to analyze image." — including a 413, which is what
+ * a real phone photo produced. Say what actually went wrong so it's fixable.
  */
-export const analyzeImage = async (base64Image: string): Promise<ScanResult> => {
+const describeScanFailure = async (response: Response): Promise<string> => {
+  // a 413 or a proxy error returns HTML, so parsing it as JSON throws in its own right
+  let serverMessage = '';
   try {
-    const response = await fetch('/api/gemini/analyze-image', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ base64Image })
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || "Failed to analyze image");
-    }
-
-    const result = await response.json();
-    return {
-      name: result.name || "Unknown Item",
-      category: result.category as FoodCategory || FoodCategory.OTHER,
-      expiryDate: result.expiryDate || null,
-      confidence: result.confidence || 0.5
-    };
-  } catch (error) {
-    console.error("Image Analysis Error:", error);
-    throw new Error("Failed to analyze image.");
+    serverMessage = (await response.json())?.message ?? '';
+  } catch {
+    /* not JSON — fall back to the status */
   }
+
+  if (response.status === 413) return 'That photo was too large to upload. Try again — it should be resized automatically.';
+  if (response.status === 429) return 'Too many scans just now. Wait a few seconds and try again.';
+  if (response.status === 503) return 'Image scanning is not configured on the server.';
+  if (response.status >= 500) return serverMessage || 'The AI service is having trouble. Try again in a moment.';
+  return serverMessage || `Scan failed (${response.status}).`;
+};
+
+/**
+ * Detects every food item in an image, reading expiry dates where they're legible.
+ * Returns one entry per item — a photo of a fridge shelf yields the whole shelf.
+ */
+export const analyzeImage = async (base64Image: string): Promise<ScanResult[]> => {
+  const response = await fetch('/api/gemini/analyze-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base64Image })
+  });
+
+  if (!response.ok) {
+    throw new Error(await describeScanFailure(response));
+  }
+
+  const data = await response.json();
+  const items: any[] = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+
+  return items.map((item: any) => ({
+    name: item.name || 'Unknown Item',
+    category: (item.category as FoodCategory) || FoodCategory.OTHER,
+    expiryDate: item.expiryDate || null,
+    confidence: typeof item.confidence === 'number' ? item.confidence : 0.5,
+    quantity: typeof item.quantity === 'number' && item.quantity > 0 ? item.quantity : 1,
+    unit: typeof item.unit === 'string' && item.unit.trim() ? item.unit.trim() : 'pcs',
+  }));
 };
 
 /**

@@ -33,6 +33,8 @@ export interface ScanResult {
   category: FoodCategory;
   expiryDate: string | null;
   confidence: number;
+  quantity?: number;
+  unit?: string;
 }
 
 // Ingredient item used inside ingredient sections. Keep a few optional fields

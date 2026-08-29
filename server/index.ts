@@ -14,8 +14,11 @@ app.use(cors({
   origin: true,
   credentials: true
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+// Scanned photos arrive as base64 JSON. express.json()'s default limit is 100KB, so a
+// real phone photo (500KB-3MB encoded) was rejected with 413 before it ever reached the
+// vision model. The client downscales before uploading; this is the backstop.
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: false, limit: "10mb" }));
 
 // Simple request logger to help debug incoming API calls from the dev client
 app.use((req, res, next) => {

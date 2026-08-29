@@ -621,10 +621,61 @@ router.post("/generate-meal-plan", async (req, res) => {
   }
 });
 
+const FOOD_CATEGORIES = ["Produce", "Dairy", "Meat", "Pantry", "Snacks", "Beverages", "Frozen", "Other"];
+
+const toCategory = (raw: any): string => {
+  const match = FOOD_CATEGORIES.find(c => c.toLowerCase() === String(raw ?? "").trim().toLowerCase());
+  return match ?? "Other";
+};
+
+/**
+ * One photo of a fridge shelf should yield the whole shelf, so this returns an array.
+ * The model is not reliable about the shape it returns, so accept the variants and drop
+ * anything unusable rather than surfacing blank rows.
+ */
+const normalizeScanItems = (raw: any): any[] => {
+  const list: any[] = Array.isArray(raw)
+    ? raw
+    : Array.isArray(raw?.items)
+      ? raw.items
+      // a single item returned bare, or under some other key
+      : (Object.values(raw ?? {}).find(v => Array.isArray(v)) as any[] | undefined)
+        ?? (raw && typeof raw === "object" && (raw.name || raw.item) ? [raw] : []);
+
+  const seen = new Set<string>();
+  const items: any[] = [];
+
+  for (const entry of list) {
+    const source = typeof entry === "string" ? { name: entry } : entry ?? {};
+    const name = [source.name, source.item, source.food, source.label]
+      .find((v: any) => typeof v === "string" && v.trim())?.trim();
+    if (!name) continue;                       // a nameless row is worse than no row
+
+    const key = name.toLowerCase();
+    if (seen.has(key)) {                       // models repeat items within one reply
+      const existing = items.find(i => i.name.toLowerCase() === key);
+      if (existing) existing.quantity += toNumber(source.quantity, 1);
+      continue;
+    }
+    seen.add(key);
+
+    items.push({
+      name,
+      category: toCategory(source.category),
+      quantity: Math.max(1, Math.round(toNumber(source.quantity, 1))),
+      unit: typeof source.unit === "string" && source.unit.trim() ? source.unit.trim() : "pcs",
+      expiryDate: cleanNullable(source.expiryDate),
+      confidence: Math.min(1, Math.max(0, toNumber(source.confidence, 0.5))),
+    });
+  }
+
+  return items;
+};
+
 router.post("/analyze-image", async (req, res) => {
   try {
     const { base64Image } = req.body;
-    
+
     if (!base64Image || base64Image.length < 100) {
       return res.status(400).json({ error: "Invalid image data" });
     }
@@ -637,28 +688,42 @@ router.post("/analyze-image", async (req, res) => {
           content: [
             {
               type: "text",
-              text: "Analyze this image for a food inventory app. Identify the food item, category, and expiration date if visible. Format date as YYYY-MM-DD. Return as JSON with fields: name, category (one of: Produce, Dairy, Meat, Pantry, Snacks, Beverages, Frozen, Other), expiryDate (nullable), confidence (0-1)."
+              text: `You are cataloguing food for a pantry app. The photo may show a whole
+fridge shelf, a cupboard, or a single item.
+
+List EVERY distinct food or drink item you can see. Rules:
+- Ignore anything that isn't food: shelves, containers, hands, packaging with no food in it.
+- One row per product. A six-pack of eggs is ONE row with quantity 6, not six rows.
+- Name items specifically ("semi-skimmed milk", not "drink"). Use the name on the label.
+- Only set expiryDate if a date is genuinely legible in the photo. Never guess or invent
+  one. Format it YYYY-MM-DD.
+- confidence is how sure you are of the identification, 0 to 1. Be honest — a blurry item
+  at the back of a shelf should score low.
+- If you truly cannot see any food, return an empty items array.
+
+Return JSON: { "items": [ { "name": string, "category": one of
+${FOOD_CATEGORIES.join(" | ")}, "quantity": number, "unit": string (pcs, g, kg, ml, L,
+bag, can, bottle, pack), "expiryDate": string|null, "confidence": number } ] }`
             },
             {
               type: "image_url",
               image_url: {
-                url: base64Image
+                url: base64Image,
+                // the default downsamples, which is what loses small printed expiry dates
+                // and items toward the back of a shelf
+                detail: "high",
               }
             }
           ]
         }
       ],
       response_format: { type: "json_object" },
-      max_tokens: 500
+      // 500 was roughly one item; a shelf can be 15+, and a truncated reply is invalid JSON
+      max_tokens: 2000
     });
 
-    const result = JSON.parse(response.choices[0]?.message?.content || "{}");
-    res.json({
-      name: result.name || "Unknown Item",
-      category: result.category || "Other",
-      expiryDate: result.expiryDate || null,
-      confidence: result.confidence || 0.5
-    });
+    const parsed = JSON.parse(response.choices[0]?.message?.content || "{}");
+    res.json({ items: normalizeScanItems(parsed) });
   } catch (error: any) {
     console.error("Image Analysis Error:", error?.message || error);
     res.status(500).json({ error: "Failed to analyze image", message: error?.message });

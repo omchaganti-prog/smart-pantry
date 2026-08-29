@@ -1,10 +1,52 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
-import { Camera, X, Check, RefreshCw, Zap, Upload } from 'lucide-react';
+import { Camera, X, Check, RefreshCw, Zap, Upload, Plus, Trash2, CheckSquare, Square, AlertTriangle } from 'lucide-react';
 import { analyzeImage } from '../services/geminiService';
-import { saveItem } from '../services/storageService';
+import { saveItems } from '../services/storageService';
+import { prepareScanImage } from '../services/imageService';
 import { FoodCategory, PantryItem, ScanResult } from '../types';
 import { useNavigate } from 'react-router-dom';
 import { useWaitMessage } from '../hooks/useWaitMessage';
+import { useWalkthrough } from '../contexts/WalkthroughContext';
+
+/** One reviewable row. A scan of a fridge shelf produces many of these. */
+interface DetectedRow {
+  id: string;
+  name: string;
+  category: FoodCategory;
+  quantity: number;
+  unit: string;
+  expiryDate: string;
+  confidence: number;
+  include: boolean;
+}
+
+const UNITS = ['pcs', 'g', 'kg', 'ml', 'L', 'bag', 'can', 'bottle', 'pack', 'box'];
+const LOW_CONFIDENCE = 0.6;
+
+// The batch outlives navigation: the walkthrough's scan step routes away on resume, and
+// a stray back-tap shouldn't discard a fridge's worth of scanning.
+const BATCH_KEY = 'smart_pantry_scan_batch';
+const BATCH_THUMB_KEY = 'smart_pantry_scan_thumb';
+
+const loadBatch = (): DetectedRow[] => {
+  try {
+    const raw = sessionStorage.getItem(BATCH_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
+const toRow = (result: ScanResult): DetectedRow => ({
+  id: crypto.randomUUID(),
+  name: result.name,
+  category: result.category,
+  quantity: result.quantity ?? 1,
+  unit: result.unit ?? 'pcs',
+  expiryDate: result.expiryDate ?? '',
+  confidence: result.confidence,
+  include: true,
+});
 
 const Scanner: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -14,15 +56,28 @@ const Scanner: React.FC = () => {
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const waiting = useWaitMessage(isAnalyzing);
-  const [scanResult, setScanResult] = useState<ScanResult | null>(null);
+  const [detected, setDetected] = useState<DetectedRow[]>(loadBatch);
+  const [photoCount, setPhotoCount] = useState(0);
+  // persisted too — the component remounts when the tour resumes or you tab away,
+  // and a batch that survives should keep its picture
+  const [lastThumbnail, setLastThumbnail] = useState<string | null>(
+    () => sessionStorage.getItem(BATCH_THUMB_KEY)
+  );
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const navigate = useNavigate();
+  const { notifyInteraction, isWalkthroughActive } = useWalkthrough();
 
-  // Manual Entry Form State
-  const [formName, setFormName] = useState('');
-  const [formCategory, setFormCategory] = useState<FoodCategory>(FoodCategory.OTHER);
-  const [formDate, setFormDate] = useState('');
-  const [formQty, setFormQty] = useState(1);
+  // keep the batch across navigation
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(BATCH_KEY, JSON.stringify(detected));
+    } catch {
+      /* not worth failing a scan over */
+    }
+  }, [detected]);
+
+  const showResults = detected.length > 0;
 
   const startCamera = async () => {
     setError(null);
@@ -81,10 +136,8 @@ const Scanner: React.FC = () => {
         canvasRef.current.height = videoRef.current.videoHeight;
         context.drawImage(videoRef.current, 0, 0);
         
-        // Convert to data URL
         const image = canvasRef.current.toDataURL('image/jpeg', 0.8);
-        
-        // Basic validation
+
         if (image.length < 1000) {
             setError("Image capture failed (empty data). Try again.");
             return;
@@ -97,59 +150,147 @@ const Scanner: React.FC = () => {
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
+  const readFile = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        const image = reader.result as string;
-        setCapturedImage(image);
-        stopCamera();
-        processImage(image);
-      };
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error('Could not read that file'));
       reader.readAsDataURL(file);
+    });
+
+  // Several photos can be picked at once — a fridge rarely fits in one frame.
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files: File[] = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+    stopCamera();
+
+    for (const file of files) {
+      try {
+        const image = await readFile(file);
+        setCapturedImage(image);
+        await processImage(image);
+      } catch {
+        setError('Could not read one of those images.');
+      }
     }
+    e.target.value = '';   // let the same file be picked again
   };
 
   const processImage = async (base64: string) => {
     setIsAnalyzing(true);
     setError(null);
+    setNotice(null);
     try {
-      const result = await analyzeImage(base64);
-      setScanResult(result);
-      
-      // Pre-fill form
-      setFormName(result.name);
-      setFormCategory(result.category);
-      setFormDate(result.expiryDate || '');
-      setFormQty(1);
+      // A full-resolution photo is 500KB-3MB as base64 — over the request limit, and far
+      // more than the model needs. Shrink before upload, and keep a small thumbnail.
+      const { upload, thumbnail } = await prepareScanImage(base64);
+      setLastThumbnail(thumbnail);
+      try { sessionStorage.setItem(BATCH_THUMB_KEY, thumbnail); } catch { /* quota */ }
 
-    } catch (err) {
+      const results = await analyzeImage(upload);
+      setPhotoCount(n => n + 1);
+
+      if (results.length === 0) {
+        setNotice("Nothing recognisable in that photo. Try again, or add an item by hand.");
+        return;
+      }
+
+      // Photographing the same shelf twice shouldn't produce two rows for one carton.
+      //
+      // This updater must stay PURE: it originally mutated rows carried over from `prev`
+      // and called setNotice from inside, so React's double-invocation applied every
+      // merge twice and one bottle of milk became two.
+      let mergedCount = 0;
+      setDetected(prev => {
+        const next = prev.map(row => ({ ...row }));
+        for (const result of results) {
+          const key = result.name.trim().toLowerCase();
+          const existing = next.find(r => r.name.trim().toLowerCase() === key);
+          if (existing) {
+            existing.quantity += result.quantity ?? 1;
+          } else {
+            next.push(toRow(result));
+          }
+        }
+        return next;
+      });
+
+      mergedCount = results.filter(result =>
+        detected.some(r => r.name.trim().toLowerCase() === result.name.trim().toLowerCase())
+      ).length;
+
+      setNotice(
+        mergedCount > 0
+          ? `Found ${results.length} item${results.length === 1 ? '' : 's'} — ${mergedCount} already in the list, so quantities were combined.`
+          : `Found ${results.length} item${results.length === 1 ? '' : 's'}.`
+      );
+    } catch (err: any) {
       console.error(err);
-      setError("AI analysis failed. Please try again or enter manually.");
+      // the service now reports the real cause (too large, rate limited, server down)
+      setError(err?.message || 'Scan failed. Try again or add the item by hand.');
     } finally {
       setIsAnalyzing(false);
     }
   };
 
-  const handleSave = () => {
-    const newItem: PantryItem = {
+  const updateRow = (id: string, patch: Partial<DetectedRow>) =>
+    setDetected(rows => rows.map(r => (r.id === id ? { ...r, ...patch } : r)));
+
+  const removeRow = (id: string) => setDetected(rows => rows.filter(r => r.id !== id));
+
+  const addBlankRow = () =>
+    setDetected(rows => [...rows, {
       id: crypto.randomUUID(),
-      name: formName,
-      category: formCategory,
-      expiryDate: formDate || null,
-      quantity: formQty,
-      unit: 'pcs',
-      addedDate: new Date().toISOString().split('T')[0],
-      thumbnail: capturedImage || undefined
-    };
-    saveItem(newItem);
+      name: '', category: FoodCategory.OTHER, quantity: 1, unit: 'pcs',
+      expiryDate: '', confidence: 1, include: true,
+    }]);
+
+  const scanMore = () => {
+    setCapturedImage(null);
+    setError(null);
+    setNotice(null);
+    startCamera();
+  };
+
+  const clearBatch = () => {
+    sessionStorage.removeItem(BATCH_THUMB_KEY);
+    setLastThumbnail(null);
+    setDetected([]);
+    setPhotoCount(0);
+    setNotice(null);
+  };
+
+  const included = detected.filter(r => r.include && r.name.trim());
+
+  const handleSave = () => {
+    if (included.length === 0) return;
+
+    const items: PantryItem[] = included.map(row => ({
+      id: crypto.randomUUID(),
+      name: row.name.trim(),
+      category: row.category,
+      expiryDate: row.expiryDate || null,
+      quantity: row.quantity,
+      unit: row.unit,
+      // was `.split('T')[0]` here but a full timestamp everywhere else
+      addedDate: new Date().toISOString(),
+      thumbnail: lastThumbnail ?? undefined,
+    }));
+
+    const result = saveItems(items);
+    if (result.failed) {
+      setError("There's no room left in this browser's storage. Remove some pantry items and try again.");
+      return;
+    }
+
+    sessionStorage.removeItem(BATCH_KEY);
+    sessionStorage.removeItem(BATCH_THUMB_KEY);
+    if (isWalkthroughActive) notifyInteraction("[data-walkthrough='nav-scan']");
     navigate('/pantry');
   };
 
   const handleRetake = () => {
     setCapturedImage(null);
-    setScanResult(null);
     setError(null);
     startCamera();
   };
@@ -240,9 +381,9 @@ const Scanner: React.FC = () => {
       </div>
 
       {/* Controls / Results Panel */}
-      <div className={`bg-white text-gray-900 transition-all duration-300 rounded-t-3xl z-30 ${scanResult ? 'h-auto max-h-[85vh] overflow-y-auto' : 'h-32'}`}>
+      <div className={`bg-white text-gray-900 transition-all duration-300 rounded-t-3xl z-30 ${showResults ? 'h-auto max-h-[85vh] overflow-y-auto' : 'h-32'}`}>
         
-        {!capturedImage && (
+        {!capturedImage && !showResults && (
           <div className="flex justify-center items-center h-full space-x-8 pb-8">
             <button 
               onClick={() => fileInputRef.current?.click()}
@@ -263,91 +404,145 @@ const Scanner: React.FC = () => {
         <input 
           type="file" 
           ref={fileInputRef} 
-          accept="image/*" 
+          accept="image/*"
+          multiple
           className="hidden" 
           onChange={handleFileUpload}
         />
 
-        {scanResult && !isAnalyzing && (
-          <div className="p-6 space-y-4">
-             <div className="flex justify-between items-start">
-               <h3 className="text-xl font-bold text-gray-800">Scan Results</h3>
-               <span className={`px-2 py-1 rounded text-xs font-bold ${scanResult.confidence > 0.8 ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                 {Math.round(scanResult.confidence * 100)}% Confidence
-               </span>
+        {showResults && !isAnalyzing && (
+          <div className="p-5 space-y-4">
+             <div className="flex justify-between items-center">
+               <div>
+                 <h3 className="text-xl font-bold text-gray-800">
+                   {detected.length} item{detected.length === 1 ? '' : 's'} found
+                 </h3>
+                 <p className="text-xs text-gray-400 font-semibold">
+                   {photoCount} photo{photoCount === 1 ? '' : 's'} · {included.length} selected
+                 </p>
+               </div>
+               <button
+                 onClick={() => {
+                   const allOn = detected.every(r => r.include);
+                   setDetected(rows => rows.map(r => ({ ...r, include: !allOn })));
+                 }}
+                 className="flex items-center gap-1.5 text-xs font-bold text-gray-500 hover:text-gray-800"
+               >
+                 {detected.every(r => r.include) ? <CheckSquare size={16} className="text-green-500" /> : <Square size={16} />}
+                 Select all
+               </button>
              </div>
 
-             <div className="space-y-4">
-               <div>
-                 <label className="block text-xs font-medium text-gray-500 mb-1">Product Name</label>
-                 <input 
-                   type="text" 
-                   value={formName} 
-                   onChange={(e) => setFormName(e.target.value)}
-                   className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 outline-none text-lg font-medium" 
-                 />
-               </div>
+             {notice && (
+               <p className="text-xs font-semibold text-green-700 bg-green-50 rounded-xl px-3 py-2">{notice}</p>
+             )}
+             {error && (
+               <p className="text-xs font-semibold text-red-600 bg-red-50 rounded-xl px-3 py-2">{error}</p>
+             )}
 
-               <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Category</label>
-                    <select 
-                      value={formCategory}
-                      onChange={(e) => setFormCategory(e.target.value as FoodCategory)}
-                      className="w-full p-3 border border-gray-200 rounded-lg outline-none bg-white"
-                    >
-                      {Object.values(FoodCategory).map(cat => (
-                        <option key={cat} value={cat}>{cat}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Quantity</label>
-                    <div className="flex items-center border border-gray-200 rounded-lg">
-                      <button onClick={() => setFormQty(Math.max(1, formQty - 1))} className="p-3 text-gray-500">-</button>
-                      <input 
-                        type="number" 
-                        value={formQty}
-                        onChange={(e) => setFormQty(parseInt(e.target.value) || 1)}
-                        className="w-full text-center outline-none" 
-                      />
-                      <button onClick={() => setFormQty(formQty + 1)} className="p-3 text-gray-500">+</button>
-                    </div>
-                  </div>
-               </div>
+             <div className="space-y-3">
+               {detected.map(row => (
+                 <div
+                   key={row.id}
+                   className={`rounded-2xl border p-3 transition-colors ${row.include ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50 opacity-60'}`}
+                 >
+                   <div className="flex items-center gap-2">
+                     <button
+                       onClick={() => updateRow(row.id, { include: !row.include })}
+                       className={`w-6 h-6 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${row.include ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300 text-transparent'}`}
+                       aria-label="Include this item"
+                     >
+                       <Check size={14} strokeWidth={4} />
+                     </button>
+                     <input
+                       type="text"
+                       value={row.name}
+                       onChange={e => updateRow(row.id, { name: e.target.value })}
+                       placeholder="Item name"
+                       className="flex-1 min-w-0 font-bold text-gray-800 bg-transparent outline-none border-b border-transparent focus:border-green-500 py-1"
+                     />
+                     <button
+                       onClick={() => removeRow(row.id)}
+                       className="p-1.5 text-gray-300 hover:text-red-500 flex-shrink-0"
+                       aria-label="Remove"
+                     >
+                       <Trash2 size={16} />
+                     </button>
+                   </div>
 
-               <div>
-                 <label className="block text-xs font-medium text-gray-500 mb-1">Expiration Date</label>
-                 <div className="relative">
-                   <input 
-                     type="date" 
-                     value={formDate} 
-                     onChange={(e) => setFormDate(e.target.value)}
-                     className={`w-full p-3 border rounded-lg outline-none ${!formDate ? 'border-red-300 text-red-500' : 'border-gray-200'}`} 
-                   />
-                   {!scanResult.expiryDate && (
-                     <p className="text-xs text-orange-500 mt-1 flex items-center">
-                       <AlertTriangleIcon size={12} className="mr-1" /> Not detected automatically
+                   {row.confidence < LOW_CONFIDENCE && (
+                     <p className="text-[11px] text-amber-600 font-semibold flex items-center gap-1 mt-1.5 ml-8">
+                       <AlertTriangle size={11} /> Not sure about this one — worth checking
                      </p>
                    )}
+
+                   <div className="grid grid-cols-2 gap-2 mt-3 ml-8">
+                     <select
+                       value={row.category}
+                       onChange={e => updateRow(row.id, { category: e.target.value as FoodCategory })}
+                       className="text-sm p-2 rounded-lg bg-gray-100 border-none font-medium text-gray-700"
+                     >
+                       {Object.values(FoodCategory).map(c => <option key={c} value={c}>{c}</option>)}
+                     </select>
+                     <div className="flex gap-1">
+                       <input
+                         type="number"
+                         min={1}
+                         value={row.quantity}
+                         onChange={e => updateRow(row.id, { quantity: Math.max(1, parseInt(e.target.value) || 1) })}
+                         className="w-14 text-sm p-2 rounded-lg bg-gray-100 border-none text-center font-medium"
+                       />
+                       <select
+                         value={row.unit}
+                         onChange={e => updateRow(row.id, { unit: e.target.value })}
+                         className="flex-1 min-w-0 text-sm p-2 rounded-lg bg-gray-100 border-none font-medium text-gray-700"
+                       >
+                         {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                       </select>
+                     </div>
+                   </div>
+
+                   <div className="mt-2 ml-8">
+                     <input
+                       type="date"
+                       value={row.expiryDate}
+                       onChange={e => updateRow(row.id, { expiryDate: e.target.value })}
+                       className="w-full text-sm p-2 rounded-lg bg-gray-100 border-none text-gray-700"
+                     />
+                     {!row.expiryDate && (
+                       <p className="text-[11px] text-gray-400 mt-1">No expiry date read — add one if you know it</p>
+                     )}
+                   </div>
                  </div>
-               </div>
+               ))}
              </div>
 
-             <div className="flex gap-3 pt-4">
-               <button 
-                 onClick={handleRetake} 
-                 className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-lg font-medium flex items-center justify-center gap-2"
+             <button
+               onClick={addBlankRow}
+               className="w-full py-2.5 rounded-xl border-2 border-dashed border-gray-300 text-gray-500 font-bold text-sm flex items-center justify-center gap-2 hover:border-green-400 hover:text-green-600 transition-colors"
+             >
+               <Plus size={16} /> Add an item by hand
+             </button>
+
+             <div className="flex gap-3 pt-1 sticky bottom-0 bg-white pb-2">
+               <button
+                 onClick={scanMore}
+                 className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-xl font-bold flex items-center justify-center gap-2"
                >
-                 <RefreshCw size={18} /> Retake
+                 <Camera size={18} /> Scan more
                </button>
-               <button 
-                 onClick={handleSave} 
-                 className="flex-[2] py-3 bg-green-600 text-white rounded-lg font-medium flex items-center justify-center gap-2 shadow-lg shadow-green-200"
+               <button
+                 onClick={handleSave}
+                 disabled={included.length === 0}
+                 className="flex-[2] py-3 bg-green-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-green-200 disabled:opacity-40 disabled:shadow-none"
                >
-                 <Check size={18} /> Save Item
+                 <Check size={18} /> Add {included.length} item{included.length === 1 ? '' : 's'}
                </button>
              </div>
+
+             <button onClick={clearBatch} className="w-full text-xs font-bold text-gray-400 hover:text-gray-600 pb-2">
+               Discard everything
+             </button>
           </div>
         )}
       </div>
