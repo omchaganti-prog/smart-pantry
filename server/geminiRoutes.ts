@@ -5,6 +5,13 @@ import { randomUUID } from "crypto";
 const router = Router();
 const MODEL_NAME = "gpt-4o-mini";
 
+// Scanning is a different job from writing recipes: it has to enumerate a cluttered
+// photo exhaustively. Measured on a photo of a full fridge (~25-30 real items):
+//   gpt-4o-mini  13 items, 37k input tokens
+//   gpt-4.1-mini 23 items,  2.3k input tokens, 12s   <- chosen
+//   gpt-5-mini   28 items,  1.8k input tokens, 41s   (too slow, noisy names)
+const VISION_MODEL = "gpt-4.1-mini";
+
 let openai: OpenAI | null = null;
 
 const getAIClient = (): OpenAI => {
@@ -681,29 +688,41 @@ router.post("/analyze-image", async (req, res) => {
     }
 
     const response = await getAIClient().chat.completions.create({
-      model: "gpt-4o-mini",
+      model: VISION_MODEL,
       messages: [
         {
           role: "user",
           content: [
             {
               type: "text",
-              text: `You are cataloguing food for a pantry app. The photo may show a whole
-fridge shelf, a cupboard, or a single item.
+              text: `You are cataloguing a photo of someone's food storage for a pantry app.
 
-List EVERY distinct food or drink item you can see. Rules:
-- Ignore anything that isn't food: shelves, containers, hands, packaging with no food in it.
-- One row per product. A six-pack of eggs is ONE row with quantity 6, not six rows.
-- Name items specifically ("semi-skimmed milk", not "drink"). Use the name on the label.
-- Only set expiryDate if a date is genuinely legible in the photo. Never guess or invent
-  one. Format it YYYY-MM-DD.
-- confidence is how sure you are of the identification, 0 to 1. Be honest — a blurry item
-  at the back of a shelf should score low.
-- If you truly cannot see any food, return an empty items array.
+Work through the picture REGION BY REGION so nothing is missed. For a fridge that means:
+the door shelves, then each main shelf from top to bottom, then the drawers at the bottom.
+For a cupboard or counter, sweep left to right, front row then back row.
 
-Return JSON: { "items": [ { "name": string, "category": one of
-${FOOD_CATEGORIES.join(" | ")}, "quantity": number, "unit": string (pcs, g, kg, ml, L,
-bag, can, bottle, pack), "expiryDate": string|null, "confidence": number } ] }`
+A full fridge usually holds 15-30 distinct products. If you have listed fewer than you can
+actually see, look again — items at the back, on the door, and inside drawers are the ones
+most often missed.
+
+For EVERY food or drink item:
+- name: be specific, using the words on the label where you can read them ("orange juice",
+  "whole milk", "shredded cheddar" — not "drink", "jar" or "container"). If the packaging
+  hides the contents, describe what it plainly is ("carton of eggs"). Do not add
+  parenthetical notes about the packaging.
+- quantity: COUNT them. Six loose eggs is quantity 6. Four oranges is 4. Three identical
+  yoghurt pots is 3. Only use 1 when there is genuinely one.
+- unit: what you would count it in — pcs, g, kg, ml, L, bag, can, bottle, pack, box, carton.
+- expiryDate: read the label. Best-before and use-by dates are usually small print on lids,
+  bottle necks and carton tops. Only fill this in if you can actually read it; return null
+  otherwise. Never guess a date. Format YYYY-MM-DD.
+- confidence: 0 to 1, honest. Something clearly labelled is 0.9+; a shape you are guessing
+  at from its silhouette is 0.4.
+
+Ignore anything that is not food: shelves, drawer fronts, water filters, empty packaging.
+
+Return JSON: { "items": [ { "name": string, "category": one of ${FOOD_CATEGORIES.join(" | ")},
+"quantity": number, "unit": string, "expiryDate": string|null, "confidence": number } ] }`
             },
             {
               type: "image_url",
@@ -719,7 +738,7 @@ bag, can, bottle, pack), "expiryDate": string|null, "confidence": number } ] }`
       ],
       response_format: { type: "json_object" },
       // 500 was roughly one item; a shelf can be 15+, and a truncated reply is invalid JSON
-      max_tokens: 2000
+      max_tokens: 4000
     });
 
     const parsed = JSON.parse(response.choices[0]?.message?.content || "{}");

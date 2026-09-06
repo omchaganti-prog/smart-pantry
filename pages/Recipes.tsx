@@ -101,11 +101,12 @@ const buildRecipeImageUrl = (
   const style = PHOTO_STYLE_PROMPTS[photoStyle] ?? PHOTO_STYLE_PROMPTS.Realistic;
   switch (attempt) {
     case 0:
-      return `https://image.pollinations.ai/prompt/${encodeURIComponent(`${subject} ${style}`)}?width=800&height=450&nologo=true`;
-    case 1:
-      // tags are already reduced to [a-z0-9] words; the commas must stay literal or
-      // LoremFlickr reads the whole thing as a single tag
+      // A real photograph of the dish first. Tags are already reduced to [a-z0-9] words;
+      // the commas must stay literal or LoremFlickr reads it all as one tag.
       return `https://loremflickr.com/800/450/${toPhotoTags(subject)}`;
+    case 1:
+      // No usable photo, so generate one of this specific dish instead.
+      return `https://image.pollinations.ai/prompt/${encodeURIComponent(`${subject} ${style}`)}?width=800&height=450&nologo=true`;
     default:
       return `https://loremflickr.com/800/450/food,meal,dish`;
   }
@@ -843,9 +844,11 @@ const Recipes: React.FC = () => {
 
     useEffect(() => {
       const url = buildRecipeImageUrl(keyword, title, attempt, userProfile?.settings?.aiPersona?.photoStyle);
-      // Only the Pollinations attempt has to queue; the stock-photo fallbacks are
-      // happy to load in parallel.
-      if (attempt > 0) {
+      // Only the generated-image attempt has to queue — Pollinations' anonymous tier
+      // allows one in-flight request per IP. Real stock photos load fine in parallel,
+      // so the first attempt (and the generic fallback) skip the queue entirely.
+      const needsQueue = url.includes('image.pollinations.ai');
+      if (!needsQueue) {
         releaseSlot.current = null;
         setImageUrl(url);
         return;

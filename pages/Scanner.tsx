@@ -23,6 +23,32 @@ interface DetectedRow {
 const UNITS = ['pcs', 'g', 'kg', 'ml', 'L', 'bag', 'can', 'bottle', 'pack', 'box'];
 const LOW_CONFIDENCE = 0.6;
 
+/**
+ * Typical shelf life once it's in your fridge, by category.
+ *
+ * Printed expiry dates are usually unreadable in a photo of a whole shelf — the text is
+ * a few pixels tall — and the model is deliberately told never to invent one. Rather
+ * than leave every date blank for the user to type, we offer a one-tap estimate. It is
+ * always presented as an estimate, never as something read off the label.
+ */
+const TYPICAL_SHELF_LIFE_DAYS: Record<FoodCategory, number> = {
+  [FoodCategory.PRODUCE]: 5,
+  [FoodCategory.DAIRY]: 7,
+  [FoodCategory.MEAT]: 3,
+  [FoodCategory.FROZEN]: 90,
+  [FoodCategory.PANTRY]: 180,
+  [FoodCategory.BEVERAGES]: 14,
+  [FoodCategory.SNACKS]: 60,
+  [FoodCategory.OTHER]: 14,
+};
+
+const estimateExpiry = (category: FoodCategory): { date: string; days: number } => {
+  const days = TYPICAL_SHELF_LIFE_DAYS[category] ?? 14;
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return { date: d.toISOString().split('T')[0], days };
+};
+
 // The batch outlives navigation: the walkthrough's scan step routes away on resume, and
 // a stray back-tap shouldn't discard a fridge's worth of scanning.
 const BATCH_KEY = 'smart_pantry_scan_batch';
@@ -510,7 +536,15 @@ const Scanner: React.FC = () => {
                        className="w-full text-sm p-2 rounded-lg bg-gray-100 border-none text-gray-700"
                      />
                      {!row.expiryDate && (
-                       <p className="text-[11px] text-gray-400 mt-1">No expiry date read — add one if you know it</p>
+                       <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                         <span className="text-[11px] text-gray-400">No date on the label</span>
+                         <button
+                           onClick={() => updateRow(row.id, { expiryDate: estimateExpiry(row.category).date })}
+                           className="text-[11px] font-bold px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-green-100 hover:text-green-700 transition-colors"
+                         >
+                           Use ~{estimateExpiry(row.category).days} days
+                         </button>
+                       </div>
                      )}
                    </div>
                  </div>
